@@ -10,13 +10,12 @@ def linking(entity, lang='en', endpoint= 'wikidata'):
   else:
     api_url= "http://dbpedia.org/sparql"
     prefix = ""
-  sparql_query = f"""
+  sparql_query = """
   SELECT ?label
   WHERE {{
     {prefix}{entity} rdfs:label ?label .
     FILTER (lang(?label) = '{lang}')
-  }}
-  """
+  }}""".format(prefix= prefix, entity= entity, lang= lang)
 
   headers = {
       "User-Agent": "QAAnswerVerbalizerApp/1.0",
