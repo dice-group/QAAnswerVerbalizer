@@ -1,4 +1,4 @@
-"""DATASETS: QUALD-9 PLUS, VQUANDA
+"""DATASETS: QUALD-9 PLUS, VQUANDA, GRAILQA
 """
 
 import json
@@ -8,18 +8,16 @@ from question_query_answer import question_query_answer
 from linking import linking
 import re
 from tqdm import tqdm
-import args 
-import constants as constants
+from constants import args
+from constants import get_project_root
 
-root_path= constants.get_project_root()
+root_path= get_project_root()
 ANS_TOKEN= '[ANS]'
-
-SYMBOLS= {'?uri': 'var_uri', '{': 'brack_open ',
-    '}': ' brack_close', '.': ' sep_dot ', '!=': 'not_equal', 
-    '=': 'equal'
-    }
+SYMBOLS= {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ', 
+          '!=': 'not_equal', '=': 'equal',  "'": '' 
+          }
     
-def vquanda(path, num= 3999, verbose= True, mask_ans= True):
+def vquanda(path, num, verbose= True, mask_ans= True):
     """
     preprocess the the Vquanda dataset. 
 
@@ -96,9 +94,8 @@ def quald(path, num, lang='en', verbose= True, mask_ans= True):
     dict of pre-processed index, question, query , verbalization
 
     """
-
-
-    data=json.load(open(path))
+    with open(path, 'r') as f:
+        data=json.loads(f.read())
     final_dict= {}
     for i in tqdm(range(num)):
         d= data[str(i)]
@@ -120,6 +117,77 @@ def quald(path, num, lang='en', verbose= True, mask_ans= True):
             final_dict[i]= info
     return final_dict
 
+def grailQA(path, num= 280, mask_ans= True):
+    """
+    pre-process the grailQA dataset.
+
+    Parameter
+    ---------
+
+    path: str
+    path of the json file of the dataset.
+
+    num: int
+    number of entries to be processed.
+
+    mask_ans: bool
+    if the answers in the verbalizations have to be masked.
+
+
+    Returns: dict
+    -------------
+
+    dict of pre-processed index, question, query, verbalization
+
+    """
+    def extract_nodes_entities(query_graph):
+        symbol_dict={'<': 'less than', '>' : 'greater_than', '<=': 'less_than_equal', '>=': 'greater_than_equal'}
+
+        edges_dict= {(edge['start'], edge['end']): edge['friendly_name'] for edge in query_graph['edges']}
+        nodes_dict={}
+        for node in query_graph['nodes']:
+            func= node['function']
+            if symbol_dict.get(func) is not None:
+                func= symbol_dict.get(func)
+            nodes_dict[node['nid']]= {'name':node['friendly_name'], 'function': func, 'type': node['node_type']}
+
+        triples=[]
+        for e in edges_dict:
+            s= nodes_dict[e[0]]
+            o= nodes_dict[e[1]]
+            p= {'name':edges_dict[(e[0], e[1])]}
+            triple= [s,p,o]
+            triples.append(triple)
+
+        return triples
+    
+    with open(path, 'r') as f:
+        data=json.loads(f.read())
+    
+    final_dict= {}
+    for i in tqdm(range(num)):
+        d= data[i]
+        index= d['qid']
+        question= d['question']
+        query_sparql= d['sparql_query']
+        query_sExpression= d['s_expression'] 
+        query_graph= d['graph_query']
+        triple= extract_nodes_entities(query_graph)
+        verbalization= d['label']
+
+        if query_sparql and question and verbalization is not None:
+            if mask_ans:
+                verbalization= mask_answer(verbalization)
+            query_sparql.lower()
+            query_sExpression.lower()
+
+        info= {'index': index, 'question': question, 'query': {'sparql': query_sparql, 's_expression': query_sExpression, 'graph': triple}, 'verbalization': verbalization}
+        final_dict[i]= info
+
+    return final_dict
+                
+
+
 def mask_answer(verbalization):
     ans_pattern= r'\[.*?\]'
     ans= re.findall(ans_pattern,verbalization)
@@ -132,12 +200,26 @@ def make_verbose(query, lang):
     """
     Makes QUALD (based on wikidata) query into a more readable format, by replacing URIs with the respective labels and 
     replacing Symbols and other operators with text descriptions.
+
+    Parameter
+    ---------
+
+    query: str
+    
+    lang: str
+    language of the data: 'en' for English, 'de' for German
+
+    Returns:
+    -------------
+
+    query: str
+
     """
     # All Regular Expression Patterns to get entities, relations and prefix
     ent_pattern= re.compile(r'wd:(Q\d+)|<http://www\.wikidata\.org/entity/(Q\d+)>')
     rel_pattern= re.compile(r'(wdt|p|pq):(P\d+)\b|<http://www\.wikidata\.org/prop/direct/(P\d+)>')
     prefix_pattern = re.compile(r'PREFIX [^:]+: <[^>]+>\s*')
-
+    
     ent = [e for sub in ent_pattern.findall(query) for e in sub if e]
     rel= [r for sub in rel_pattern.findall(query) for r in sub if r]
     ent =list(set(ent))
@@ -150,13 +232,11 @@ def make_verbose(query, lang):
     
     for relation in rel:
         label= linking(relation, lang)
-        query = query.replace("""wdt:{r}""".format(r=relation), label)
-        query=query.replace("""<http://www.wikidata.org/prop/direct/{r}>""".format(r=relation), label)
+        query= query.replace("""wdt:{r}""".format(r=relation), label)
+        query= query.replace("""<http://www.wikidata.org/prop/direct/{r}>""".format(r=relation), label)
     
-    for s in SYMBOLS:
-        if s in query:
-            query= query.replace(s, SYMBOLS[s])
-    query = prefix_pattern.sub('', query)
+    query= prefix_pattern.sub('', query)
+    query= replace_symbols_var(query)
 
     return query
 
@@ -169,15 +249,29 @@ def make_verbose_vquanda(query):
     ent = [e for sub in pattern.findall(query) for e in sub if e]
     ent =list(set(ent))
     for e in ent:
-        label= linking(e, endpoint= 'dbpedia')
+        label= linking(e, endpoint= 'dbpedia') #Get the labels of entities from the endpoint
         query=query.replace(e,label)
     
     type_url= '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
     if type_url in query:
         query= query.replace(type_url, 'type')
+    query= replace_symbols_var(query)
+
+    return query
+
+def replace_symbols_var(query):
+    """Replace symbols in the query with more readable charaters in natural language"""
     for s in SYMBOLS:
         if s in query:
             query= query.replace(s, SYMBOLS[s])
+
+    #Find and replace ? identifier in variables with var_ 
+    var_pattern =re.compile(r'(?:\?\w+)') 
+    var= re.findall(var_pattern, query)
+    for v in var:
+        v_var= v.replace('?', 'var_')
+        query=query.replace(v, v_var)
+
     return query
 
 
@@ -188,11 +282,14 @@ def write_to_file(dataset, data, name):
 
 if __name__ == '__main__':
 
-    filepath= """{path}/data/{dataset}/{name}.json""".format(path=root_path, dataset=constants.args.dataset, name= constants.args.name)
-    if constants.args.dataset == 'vquanda':
-        pre_data= vquanda(filepath, num= constants.args.num)
+    filepath= """{path}/data/{dataset}/{name}.json""".format(path=root_path, dataset=args.dataset, name= args.name)
+    if args.dataset == 'vquanda':
+        pre_data= vquanda(filepath, num= args.num)
         
-    if constants.args.dataset == 'quald':
-        pre_data= quald(filepath, num= constants.args.num, lang= constants.args.lang)
+    if args.dataset == 'quald':
+        pre_data= quald(filepath, num= args.num, lang= args.lang)
     
-    write_to_file(constants.args.dataset, pre_data, constants.args.name)
+    if args.dataset == 'grailQA':
+        pre_data= grailQA(filepath, num= args.num, mask_ans= args.mask_ans)
+    
+    write_to_file(args.dataset, pre_data, args.name)
