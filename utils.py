@@ -86,7 +86,7 @@ class Score(object):
         return self.sacre_bleu.compute(predictions=[pred], references=[ref])
 
     def data_scorer(self, data, model, tokenizer, torch_device):
-        for i in tqdm(range(len(data[:10]))):
+        for i in tqdm(range(len(data))):
             pred = predict(model, tokenizer,
                            data.iloc[i, 0], data.iloc[i, 1], torch_device)
             ref = data.iloc[i, 2]
