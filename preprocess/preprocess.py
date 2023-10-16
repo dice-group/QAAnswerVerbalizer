@@ -53,7 +53,7 @@ def vquanda(path, num, verbose=True, mask_ans=True):
         verbalization = d['verbalized_answer']
         query = d['query']
 
-        if query and question and verbalization is not None:
+        if query and question and verbalization is not (None or ""):
             if verbose:
                 query = make_verbose_vquanda(query)
             query = query.lower()
@@ -106,7 +106,7 @@ def quald(path, num, lang='en', verbose=True, mask_ans=True):
         query = qa.get_query()
         verbalization = qa.get_verbalized()
 
-        if query and question and verbalization is not None:
+        if query and question and verbalization is not (None or ""):
             if verbose:
                 query = make_verbose(query, lang)
             if mask_ans:
@@ -196,7 +196,8 @@ def grailQA(path, num=280, mask_ans=True):
 def mask_answer(verbalization):
     ans_pattern = r'\[.*?\]'
     ans = re.findall(ans_pattern, verbalization)
-    verbalization = verbalization.replace(ans[0], ANS_TOKEN)
+    if ans:
+        verbalization = verbalization.replace(ans[0], ANS_TOKEN)
 
     return verbalization
 
