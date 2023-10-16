@@ -8,9 +8,9 @@ class QAAnswerVerbalizationDataset(torch.utils.data.Dataset):
         self.labels = labels
 
     def __getitem__(self, idx):
-        item = {key: torch.tensor(val[idx])
+        item = {key: (val[idx]).clone().detach()
                 for key, val in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels['input_ids'][idx])
+        item['labels'] = (self.labels['input_ids'][idx]).clone().detach()
         return item
 
     def __len__(self):
@@ -47,8 +47,10 @@ def train_val_split(data, frac=0.8):
 
 
 def tokenize_data(tokenizer, questions, atq, labels):
-    encodings = tokenizer(questions, atq, truncation=True, padding=True)
-    decodings = tokenizer(labels, truncation=True, padding=True)
+    encodings = tokenizer(questions, atq, return_tensors="pt",
+                          truncation=True, padding=True)
+    decodings = tokenizer(labels, return_tensors="pt",
+                          truncation=True, padding=True)
     tokenized_data = QAAnswerVerbalizationDataset(encodings, decodings)
 
     return tokenized_data
