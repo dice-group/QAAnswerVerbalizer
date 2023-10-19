@@ -1,11 +1,11 @@
 import sys
 sys.path.append("./")
-from transformers import Trainer, TrainingArguments
-from QAAVData import prepare_data, train_val_split
-from constants import *
-from constants import args
-from constants import get_project_root
 from utils import *
+from constants import get_project_root
+from constants import args
+from constants import *
+from QAAVData import prepare_data, train_val_split
+import transformers
 
 
 if __name__ == '__main__':
@@ -23,9 +23,9 @@ if __name__ == '__main__':
 
     tr_data, val_data = prepare_data(tokenizer, train_data, val_data)
 
-    training_args = TrainingArguments(
-        output_dir="""{path}/output/{dataset}""".format(
-            path=root_path, dataset=args.dataset),
+    training_args = transformers.TrainingArguments(
+        output_dir="""{path}/output/{dataset}/{model}""".format(
+            path=root_path, dataset=args.dataset, model=args.model_name),
         num_train_epochs=args.train_epochs,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
@@ -36,13 +36,13 @@ if __name__ == '__main__':
         eval_steps=args.eval_steps,
         warmup_steps=100,
         weight_decay=0.01,
-        logging_dir="""{path}/output/{dataset}/logs""".format(
-            path=root_path, dataset=args.dataset),
+        logging_dir="""{path}/output/{dataset}/{model}/logs""".format(
+            path=root_path, dataset=args.dataset, model=args.model_name),
         logging_steps=10,
         load_best_model_at_end=True,
     )
 
-    trainer = Trainer(
+    trainer = transformers.Trainer(
         model=model,
         args=training_args,
         train_dataset=tr_data,
