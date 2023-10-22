@@ -3,9 +3,9 @@ from utils import *
 import logging
 
 root_path = get_project_root()
+#  Add logger and formatting
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-# logging.basicConfig(level=logging.INFO)
 
 con_handler = logging.StreamHandler()
 file_handler = logging.FileHandler("""{path}/results/{dataset}_{model}_test.log""".format(
@@ -40,14 +40,18 @@ if __name__ == '__main__':
         """-- Loading Tokenizer: {model} --""".format(model=args.model_name))
     tokenizer = set_tokenizer(model_name=args.model_name, path=path)
 
+    # Calculate score 
     scorer = Score()
     scorer.data_scorer(
         data, model=model, tokenizer=tokenizer, torch_device=torch_device)
     scorer.save_to_file()
 
+    # Get average score of all metrics
     logger.info("""Meteor Score Average: {score}""".format(
         score=scorer.meteor_avg.avg))
     logger.info("""Bleu Score Average: {score}""".format(
         score=scorer.bleu_avg.avg))
     logger.info("""Sacre Bleu Score Average: {score}""".format(
         score=scorer.sacrebleu_avg.avg))
+    logger.info("""Rouge Score Average: {score}""".format(
+        score=scorer.rouge_avg.avg))

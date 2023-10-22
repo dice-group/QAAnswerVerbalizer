@@ -14,11 +14,16 @@ def make_df(path=str):
         data = json.load(f)
 
     df = pd.DataFrame({"questions": [], "queries": [], 'labels': []}, index=[])
-    for i in range(len(data)):
-        d = data[str(i)]
-        # add Answer token and Separator token along with query
-        ans_query = ANS_TOKEN + ' ' + SEP_TOKEN + ' ' + d['query']
-        df.loc[d['index']] = [d['question'], ans_query, d['verbalization']]
+    for _, value in data.items():
+        if args.mask_ans:
+            ans = ANS_TOKEN
+        else:
+            ans = value['answers']
+
+        # add Answer token or Answer and Separator token along with query
+        ans_query = ans + ' ' + SEP_TOKEN + ' ' + value['query']
+        df.loc[value['index']] = [value['question'],
+                                  ans_query, value['verbalization']]
 
     return df
 
@@ -72,9 +77,11 @@ class Score(object):
         self.bleu = evaluate.load('bleu')
         self.meteor = evaluate.load('meteor')
         self.sacre_bleu = evaluate.load('sacrebleu')
+        self.rouge = evaluate.load('rouge')
         self.bleu_avg = AverageScore()
         self.sacrebleu_avg = AverageScore()
         self.meteor_avg = AverageScore()
+        self.rouge_avg = AverageScore()
 
     def _bleu_score(self, pred, ref):
         return self.bleu.compute(predictions=[pred], references=[ref])
@@ -85,6 +92,9 @@ class Score(object):
     def _sacrebleu(self, pred, ref):
         return self.sacre_bleu.compute(predictions=[pred], references=[ref])
 
+    def _rouge_score(self, pred, ref):
+        return self.rouge.compute(predictions=[pred], references=[ref])
+
     def data_scorer(self, data, model, tokenizer, torch_device):
         for i in tqdm(range(len(data))):
             pred = predict(model, tokenizer,
@@ -94,18 +104,20 @@ class Score(object):
             bleu_score = self._bleu_score(pred, ref)
             meteor_score = self._meteor_score(pred, ref)
             sacrebleu_score = self._sacrebleu(pred, ref)
+            rouge_score = self._rouge_score(pred, ref)
 
             self.bleu_avg.calc_avg(bleu_score['bleu'])
             self.meteor_avg.calc_avg(meteor_score['meteor'])
             self.sacrebleu_avg.calc_avg(sacrebleu_score['score'])
+            self.rouge_avg.calc_avg(rouge_score['rouge1'])
 
             self.results.append({'hyp': pred, 'reference': ref, 'bleu': bleu_score,
-                                'meteor': meteor_score['meteor'], 'sacre_bleu': sacrebleu_score})
-
-            print(bleu_score, meteor_score, sacrebleu_score)
+                                'meteor': meteor_score['meteor'], 'sacre_bleu': sacrebleu_score, 'rouge': rouge_score['rouge1']})
+        self.results.append({'bleu_avg': self.bleu_avg.avg, 'meteor_avg': self.meteor_avg.avg,
+                            'sacrebleu_avg': self.sacrebleu_avg.avg, 'rouge_avg': self.rouge_avg.avg})
         return self.results
 
     def save_to_file(self):
         result = json.dumps(self.results)
-        with open("""{path}/output/{dataset}_result.json""".format(path=root_path, dataset=args.dataset), 'w', encoding='utf-8') as f:
+        with open("""{path}/output/{dataset}_{model}_output.json""".format(path=root_path, dataset=args.dataset, model=args.model_name), 'w', encoding='utf-8') as f:
             f.write(result)
