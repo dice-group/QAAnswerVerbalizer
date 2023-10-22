@@ -166,22 +166,21 @@ def grailQA(path, num=280):
     final_dict = {}
     for i in tqdm(range(num)):
         d = data[i]
-        index = d['qid']
-        question = d['question']
-        query_sparql = d['sparql_query']
-        query_sExpression = d['s_expression']
-        query_graph = d['graph_query']
+        qa = qqa(d)
+        index = qa.get_id()
+        question = qa.get_question()
+        query_sparql, query_graph = qa.get_query()
         triple = extract_nodes_entities(query_graph)
-        verbalization = d['label']
+        verbalization = qa.get_verbalized()
+        answers = qa.get_ans_label()
 
         if query_sparql and question and verbalization is not None:
             if args.mask_ans:
                 verbalization = mask_answer(verbalization)
             query_sparql.lower()
-            query_sExpression.lower()
 
         info = {'index': index, 'question': question, 'query': {'sparql': query_sparql,
-                                                                's_expression': query_sExpression, 'graph': triple}, 'verbalization': verbalization}
+                                                                'graph': triple}, 'verbalization': verbalization, 'answers': answers}
         final_dict[i] = info
 
     return final_dict
@@ -299,6 +298,6 @@ if __name__ == '__main__':
         pre_data = quald(filepath, num=args.num, lang=args.lang)
 
     if args.dataset == 'grailQA':
-        pre_data = grailQA(filepath, num=args.num, mask_ans=args.mask_ans)
+        pre_data = grailQA(filepath, num=args.num)
 
     write_to_file(args.dataset, pre_data, args.name)

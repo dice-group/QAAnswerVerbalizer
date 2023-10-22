@@ -20,6 +20,8 @@ class question_query_answer:
                     return None
         if self.dataset == 'vquanda':
             return self.data['question']
+        if self.dataset == 'grailQA':
+            return self.data['question']
         else:
             return None
 
@@ -31,10 +33,17 @@ class question_query_answer:
                     return v
         if self.dataset == 'vquanda':
             return self.data['query']
+        if self.dataset == 'grailQA':
+            query_sparql = self.data['sparql_query']
+            query_graph = self.data['graph_query']
+            return query_sparql, query_graph
 
     def get_answers(self):
         """Get all the answers"""
-        return self.data['answers']
+        if self.dataset == 'quald':
+            return self.data['answers']
+        if self.dataset == 'grailQA':
+            return self.data['answer']
 
     def get_id(self):
         """Get the id of the object. One id can be mapped to questions, query and answers """
@@ -42,6 +51,10 @@ class question_query_answer:
             return self.data['id']
         if self.dataset == 'vquanda':
             return self.data['uid']
+        if self.dataset == 'grailQA':
+            return self.data['qid']
+        else:
+            return None
 
     def get_label_endpoint(self, e):
         return link(e)
@@ -86,13 +99,27 @@ class question_query_answer:
             answers = re.findall(pattern, self.get_verbalized())
             ans_string = ", ".join(answers)
             return ans_string
+
+        if self.dataset == 'grailQA':
+            ans = self.get_answers()
+
+            answers = []
+            for a in ans[:args.ans_limit]:
+                if a['answer_type'] == 'Entity':
+                    label = a['entity_name']
+                else:
+                    label = a['answer_argument']
+                answers.append(label)
+            ans_string = (', ').join(answers)
+            return ans_string
+
         else:
             return None
 
     def get_verbalized(self):
         """Replace the verbalization answers or token withing the []"""
+        pattern = r'\[.*?\]'
         if self.dataset == 'quald':
-            pattern = r'\[.*?\]'
             verbalized_ans = self.data['verbalized']['en']
             answers = "[" + self.get_ans_label() + "]"
             verbalized = re.sub(pattern, answers, verbalized_ans)
@@ -101,5 +128,12 @@ class question_query_answer:
         if self.dataset == 'vquanda':
             verbalized = self.data['verbalized_answer']
             return verbalized
+
+        if self.dataset == 'grailQA':
+            verbalized_ans = self.data['label']
+            answers = "[" + self.get_ans_label() + "]"
+            verbalized = re.sub(pattern, answers, verbalized_ans)
+            return verbalized
+
         else:
             return None
