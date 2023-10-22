@@ -3,13 +3,13 @@
 
 import sys
 sys.path.append("./")
-import json
-from question_query_answer import question_query_answer
-from linking import linking
-import re
-from tqdm import tqdm
-from constants import args
 from constants import get_project_root
+from constants import args
+from tqdm import tqdm
+import re
+from linking import linking
+from question_query_answer import question_query_answer as qqa
+import json
 
 root_path = get_project_root()
 ANS_TOKEN = '[ANS]'
@@ -18,7 +18,7 @@ SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
            }
 
 
-def vquanda(path, num, verbose=True, mask_ans=True):
+def vquanda(path, num, verbose=True):
     """
     preprocess the the Vquanda dataset. 
 
@@ -34,10 +34,6 @@ def vquanda(path, num, verbose=True, mask_ans=True):
     verbose: bool
     if the query has to be made more natural language readable
 
-    mask_ans: bool
-    if the answers in the verbalizations have to be masked.
-
-
     Returns: dict
     -------------
 
@@ -48,25 +44,27 @@ def vquanda(path, num, verbose=True, mask_ans=True):
     final_dict = {}
     for i in tqdm(range(num)):
         d = data[i]
-        index = d['uid']
-        question = d['question']
-        verbalization = d['verbalized_answer']
-        query = d['query']
+        qa = qqa(d)
+        index = qa.get_id()
+        question = qa.get_question()
+        verbalization = qa.get_verbalized()
+        query = qa.get_query()
+        answers = qa.get_ans_label()
 
-        if query and question and verbalization is not (None or ""):
+        if query and question and verbalization is not (None and ""):
             if verbose:
                 query = make_verbose_vquanda(query)
             query = query.lower()
-        if mask_ans:
+        if args.mask_ans:
             verbalization = mask_answer(verbalization)
 
         info = {'index': index, 'question': question,
-                'query': query, 'verbalization': verbalization}
+                'query': query, 'verbalization': verbalization, 'answers': answers}
         final_dict[i] = info
     return final_dict
 
 
-def quald(path, num, lang='en', verbose=True, mask_ans=True):
+def quald(path, num, lang='en', verbose=True):
     """
     pre-process the quald-9 plus dataset.
 
@@ -88,7 +86,6 @@ def quald(path, num, lang='en', verbose=True, mask_ans=True):
     mask_ans: bool
     if the answers in the verbalizations have to be masked.
 
-
     Returns: dict
     -------------
 
@@ -100,26 +97,27 @@ def quald(path, num, lang='en', verbose=True, mask_ans=True):
     final_dict = {}
     for i in tqdm(range(num)):
         d = data[str(i)]
-        qa = question_query_answer(d)
+        qa = qqa(d)
         index = qa.get_id()
         question = qa.get_question(lang)
         query = qa.get_query()
         verbalization = qa.get_verbalized()
+        answers = qa.get_ans_label()
 
-        if query and question and verbalization is not (None or ""):
+        if query is not (None and "") and question is not (None and "") and verbalization is not (None and ""):
             if verbose:
                 query = make_verbose(query, lang)
-            if mask_ans:
+            if args.mask_ans:
                 verbalization = mask_answer(verbalization)
             query = query.lower()
 
             info = {'index': index, 'question': question,
-                    'query': query, 'verbalization': verbalization}
+                    'query': query, 'verbalization': verbalization, 'answers': answers}
             final_dict[i] = info
     return final_dict
 
 
-def grailQA(path, num=280, mask_ans=True):
+def grailQA(path, num=280):
     """
     pre-process the grailQA dataset.
 
@@ -131,10 +129,6 @@ def grailQA(path, num=280, mask_ans=True):
 
     num: int
     number of entries to be processed.
-
-    mask_ans: bool
-    if the answers in the verbalizations have to be masked.
-
 
     Returns: dict
     -------------
@@ -181,7 +175,7 @@ def grailQA(path, num=280, mask_ans=True):
         verbalization = d['label']
 
         if query_sparql and question and verbalization is not None:
-            if mask_ans:
+            if args.mask_ans:
                 verbalization = mask_answer(verbalization)
             query_sparql.lower()
             query_sExpression.lower()
