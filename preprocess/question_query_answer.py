@@ -18,7 +18,7 @@ class question_query_answer:
                     return question['string']
                 else:
                     return None
-        if self.dataset == 'vquanda':
+        if self.dataset == 'vquanda' or 'paraQA':
             return self.data['question']
         if self.dataset == 'grailQA':
             return self.data['question']
@@ -31,7 +31,7 @@ class question_query_answer:
             if 'query' in self.data:
                 for _, v in self.data['query'].items():
                     return v
-        if self.dataset == 'vquanda':
+        if self.dataset == 'vquanda' or 'paraQA':
             return self.data['query']
         if self.dataset == 'grailQA':
             query_sparql = self.data['sparql_query']
@@ -49,15 +49,16 @@ class question_query_answer:
         """Get the id of the object. One id can be mapped to questions, query and answers """
         if self.dataset == 'quald':
             return self.data['id']
-        if self.dataset == 'vquanda':
+        if self.dataset == 'vquanda' or 'paraQA':
             return self.data['uid']
         if self.dataset == 'grailQA':
             return self.data['qid']
         else:
             return None
 
-    def get_label_endpoint(self, e):
-        return link(e)
+    def get_label_endpoint(e, endpoint="wikidata"):
+        label = link(entity=e, endpoint=endpoint)
+        return label
 
     def search_entity(self, uri):
         """Search Entity in the uri and get label from  endpoint"""
@@ -113,11 +114,21 @@ class question_query_answer:
             ans_string = (', ').join(answers)
             return ans_string
 
+        if self.dataset == 'paraQA':
+            pattern = r'\[(.*?)\]'
+            verbalized_list = self.get_verbalized()
+            answers = re.findall(pattern, verbalized_list[0])
+            ans_string = ", ".join(answers)
+            return ans_string
+
         else:
             return None
 
     def get_verbalized(self):
-        """Replace the verbalization answers or token withing the []"""
+        """
+        Replace the verbalization answers or token withing the [] in Qald and GrailQA.
+        ParaQA has multiple verbalizations and hence a list is returned.
+        """
         pattern = r'\[.*?\]'
         if self.dataset == 'quald':
             verbalized_ans = self.data['verbalized']['en']
@@ -135,5 +146,14 @@ class question_query_answer:
             verbalized = re.sub(pattern, answers, verbalized_ans)
             return verbalized
 
+        if self.dataset == 'paraQA':
+            verbalized = []
+            verbalized.append(self.data['verbalized_answer'])
+            for i in range(2, 8):
+                key = """verbalized_answer_{i}""".format(i=i)
+                verbalized_ans = self.data[key]
+                if verbalized_ans != "":
+                    verbalized.append(verbalized_ans)
+            return verbalized
         else:
             return None

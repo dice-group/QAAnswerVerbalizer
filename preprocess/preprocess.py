@@ -7,7 +7,6 @@ from constants import get_project_root
 from constants import args
 from tqdm import tqdm
 import re
-from linking import linking
 from question_query_answer import question_query_answer as qqa
 import json
 
@@ -37,7 +36,7 @@ def vquanda(path, num, verbose=True):
     Returns: dict
     -------------
 
-    dict of pre-processed index, question, query , verbalization
+    dict of pre-processed index, question, query , verbalization, answers
     """
     with open(path, 'r') as f:
         data = json.loads(f.read())
@@ -83,13 +82,10 @@ def quald(path, num, lang='en', verbose=True):
     verbose: bool
     if the query has to be made more natural language readable
 
-    mask_ans: bool
-    if the answers in the verbalizations have to be masked.
-
     Returns: dict
     -------------
 
-    dict of pre-processed index, question, query , verbalization
+    dict of pre-processed index, question, query , verbalization, answers
 
     """
     with open(path, 'r') as f:
@@ -133,7 +129,7 @@ def grailQA(path, num=280):
     Returns: dict
     -------------
 
-    dict of pre-processed index, question, query, verbalization
+    dict of pre-processed index, question, query, verbalization, answers
 
     """
     def extract_nodes_entities(query_graph):
@@ -186,6 +182,52 @@ def grailQA(path, num=280):
     return final_dict
 
 
+def paraQA(path, verbose=True):
+    """
+    pre-process the paraQA dataset.
+
+    Parameter
+    ---------
+
+    path: str
+    path of the json file of the dataset.
+
+    verbose: bool
+    if the query has to be made more natural language readable
+
+    Returns: dict
+    -------------
+
+    dict of pre-processed index, question, query, verbalization, answers
+
+    """
+
+    with open(path, 'r') as f:
+        data = json.loads(f.read())
+
+    final_dict = {}
+    for i in tqdm(range(len(data))):
+        d = data[i]
+        qa = qqa(d)
+        index = qa.get_id()
+        question = qa.get_question()
+        verbalization = qa.get_verbalized()
+        query = qa.get_query()
+        answers = qa.get_ans_label()
+
+        if query is not (None and "") and question is not (None and "") and verbalization is not (None and ""):
+            if verbose:
+                query = make_verbose_vquanda(query)
+            if args.mask_ans:
+                verbalization = mask_answer(verbalization)
+            query = query.lower()
+
+            info = {'index': index, 'question': question,
+                    'query': query, 'verbalization': verbalization, 'answers': answers}
+            final_dict[i] = info
+    return final_dict
+
+
 def mask_answer(verbalization):
     ans_pattern = r'\[.*?\]'
     ans = re.findall(ans_pattern, verbalization)
@@ -227,13 +269,13 @@ def make_verbose(query, lang):
     rel = list(set(rel))
 
     for entity in ent:
-        label = linking(entity, lang)
+        label = qqa.get_label_endpoint(entity)
         query = query.replace("""wd:{e}""".format(e=entity), label)
         query = query.replace(
             """<http://www.wikidata.org/entity/{e}>""".format(e=entity), label)
 
     for relation in rel:
-        label = linking(relation, lang)
+        label = qqa.get_label_endpoint(relation)
         query = query.replace("""wdt:{r}""".format(r=relation), label)
         query = query.replace(
             """<http://www.wikidata.org/prop/direct/{r}>""".format(r=relation), label)
@@ -255,7 +297,7 @@ def make_verbose_vquanda(query):
     ent = list(set(ent))
     for e in ent:
         # Get the labels of entities from the endpoint
-        label = linking(e, endpoint='dbpedia')
+        label = qqa.get_label_endpoint(e, endpoint='dbpedia')
         query = query.replace(e, label)
 
     type_url = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
@@ -299,5 +341,8 @@ if __name__ == '__main__':
 
     if args.dataset == 'grailQA':
         pre_data = grailQA(filepath, num=args.num)
+
+    if args.dataset == 'paraQA':
+        pre_data = paraQA(filepath)
 
     write_to_file(args.dataset, pre_data, args.name)
