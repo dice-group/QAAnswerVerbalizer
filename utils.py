@@ -5,6 +5,7 @@ from tqdm import tqdm
 import evaluate
 from transformers import PegasusForConditionalGeneration, PegasusTokenizer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
+from transformers import BartForConditionalGeneration, BartTokenizer
 
 root_path = get_project_root()
 
@@ -14,16 +15,25 @@ def make_df(path=str):
         data = json.load(f)
 
     df = pd.DataFrame({"questions": [], "queries": [], 'labels': []}, index=[])
+    df = df.astype('object')
+
     for _, value in data.items():
+        index = value['index']
+        question = value['question']
+        verbalization = value['verbalization']
+        answers = value['answers']
+        if args.dataset == 'paraQA' and args.name == 'train':
+            # In-case of ParaQA. only use the fist verbalization
+            verbalization = value['verbalization'][0]
+
         if args.mask_ans:
             ans = ANS_TOKEN
         else:
-            ans = value['answers']
+            ans = answers
 
         # add Answer token or Answer and Separator token along with query
         ans_query = ans + ' ' + SEP_TOKEN + ' ' + value['query']
-        df.loc[value['index']] = [value['question'],
-                                  ans_query, value['verbalization']]
+        df.loc[index] = [question, ans_query, verbalization]
 
     return df
 
@@ -36,6 +46,9 @@ def set_model(model_name, path, device):
     if model_name == 't5':
         model = T5ForConditionalGeneration.from_pretrained(path).to(device)
 
+    if model_name == 'bart':
+        model = BartForConditionalGeneration.from_pretrained(path).to(device)
+
     return model
 
 
@@ -45,6 +58,9 @@ def set_tokenizer(model_name, path):
 
     if model_name == 't5':
         tokenizer = T5Tokenizer.from_pretrained(path)
+
+    if model_name == 'bart':
+        tokenizer = BartTokenizer.from_pretrained(path)
 
     return tokenizer
 
