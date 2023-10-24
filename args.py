@@ -6,16 +6,19 @@ def get_parser():
         description='QAAnswerVerbalizer: Generating Natural Language Answers for KBQA Systems')
 
     parser.add_argument('--dataset', default='vquanda',
-                        type=str, help='choice between vquanda, quald')
-    parser.add_argument('--num', default=3999, type=int)
-    parser.add_argument('--name', default='test', type=str,
+                        type=str, help='choice between vquanda, qald, grailQA, paraQA')
+    parser.add_argument('--num', default=100, type=int)
+    parser.add_argument('--name', default='train', type=str,
                         help='choice between train and test data')
-    parser.add_argument('--lang', default='de', type=str,
+    parser.add_argument('--lang', default='en', type=str,
                         help='Language choice only available for Quald-9 plus. en for English, de for German')
-
+    parser.add_argument('--mask_ans', default=True, type=bool,
+                        help='Choice to mask answer with answer token')
+    parser.add_argument('--ans_limit', default=5, type=bool,
+                        help='Choice to mask answer with answer token')
     parser.add_argument('--model_name', default='pegasus', type=str)
     parser.add_argument(
-        '--checkpoint_path', default='./output/checkpoint-800', type=str, help='Checkpoint path')
+        '--checkpoint_path', default='./output/quald/pegasus/checkpoint-5000', type=str, help='Checkpoint path')
     parser.add_argument('--model_path', default='google/pegasus-xsum',
                         type=str, help='Path of the model')
     parser.add_argument('--tokenizer_path', default='google/pegasus-xsum',
@@ -26,4 +29,7 @@ def get_parser():
                         help='Number of steps after which checkpoint will be created')
     parser.add_argument('--eval_steps', default=1000, type=int,
                         help='Number of steps for evaluation')
+    parser.add_argument('--mode', default='triples', type=str,
+                        help='If Triples or Query is to be used.')
+
     return parser
