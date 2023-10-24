@@ -22,17 +22,25 @@ def make_df(path=str):
         question = value['question']
         verbalization = value['verbalization']
         answers = value['answers']
+        query = value['query']
         if args.dataset == 'paraQA' and args.name == 'train':
             # In-case of ParaQA. only use the fist verbalization
             verbalization = value['verbalization'][0]
 
+        if args.dataset == 'grailQA':
+            if args.mode == 'triples':
+                triple = query['graph']
+                triple = get_triples_string(triple)
+                query = triple
+            else:
+                query = query['sparql']
         if args.mask_ans:
             ans = ANS_TOKEN
         else:
             ans = answers
 
         # add Answer token or Answer and Separator token along with query
-        ans_query = ans + ' ' + SEP_TOKEN + ' ' + value['query']
+        ans_query = ans + ' ' + SEP_TOKEN + ' ' + query
         df.loc[index] = [question, ans_query, verbalization]
 
     return df
@@ -73,6 +81,21 @@ def predict(model, tokenizer, question, query, torch_device):
         outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
 
     return verbalization
+
+
+def get_triples_string(triples):
+    """Join triples in a string"""
+    for t in triples:
+        triple_string = ""
+        all_triples = ""
+        for i in t:
+            triple_string += ' ' + i['name']
+        if all_triples:
+            # Add SEP_TOKEN between multiple triples
+            all_triples += SEP_TOKEN + triple_string
+        else:
+            all_triples += triple_string
+    return all_triples
 
 
 class AverageScore():
