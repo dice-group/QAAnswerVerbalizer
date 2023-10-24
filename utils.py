@@ -111,6 +111,21 @@ class AverageScore():
 
 
 class Score(object):
+    """
+    Calculates scores and average on different metrics after prediction. 
+    The Bleu, Meteor and Rouge are normalized. 
+    --------
+    Metrics
+    --------
+    1. Bleu
+    2. Meteor
+    3. Sacre Bleu
+    4. Rouge
+
+    -------------------------
+    returns: dict
+
+    """
     def __init__(self):
         self.results = []
         self.bleu = evaluate.load('bleu')
@@ -121,6 +136,7 @@ class Score(object):
         self.sacrebleu_avg = AverageScore()
         self.meteor_avg = AverageScore()
         self.rouge_avg = AverageScore()
+        self.rouge_L_avg = AverageScore()
 
     def _bleu_score(self, pred, ref):
         return self.bleu.compute(predictions=[pred], references=[ref])
@@ -134,6 +150,9 @@ class Score(object):
     def _rouge_score(self, pred, ref):
         return self.rouge.compute(predictions=[pred], references=[ref])
 
+    def _normalize(self, score):
+        return 100*score
+
     def data_scorer(self, data, model, tokenizer, torch_device):
         for i in tqdm(range(len(data))):
             pred = predict(model, tokenizer,
@@ -145,15 +164,23 @@ class Score(object):
             sacrebleu_score = self._sacrebleu(pred, ref)
             rouge_score = self._rouge_score(pred, ref)
 
-            self.bleu_avg.calc_avg(bleu_score['bleu'])
-            self.meteor_avg.calc_avg(meteor_score['meteor'])
-            self.sacrebleu_avg.calc_avg(sacrebleu_score['score'])
-            self.rouge_avg.calc_avg(rouge_score['rouge1'])
+            n_bleu_score = self._normalize(bleu_score['bleu'])
+            n_meteor_score = self._normalize(meteor_score['meteor'])
+            n_rouge_score = self._normalize(rouge_score['rouge2'])
+            n_rouge_L_score = self._normalize(rouge_score['rougeL'])
 
-            self.results.append({'hyp': pred, 'reference': ref, 'bleu': bleu_score,
-                                'meteor': meteor_score['meteor'], 'sacre_bleu': sacrebleu_score, 'rouge': rouge_score['rouge1']})
+            self.bleu_avg.calc_avg(n_bleu_score)
+            self.meteor_avg.calc_avg(n_meteor_score)
+            self.rouge_avg.calc_avg(n_rouge_score)
+            self.rouge_L_avg.calc_avg(n_rouge_L_score)
+            self.sacrebleu_avg.calc_avg(sacrebleu_score['score'])
+
+            self.results.append({'hyp': pred, 'reference': ref, 'bleu': n_bleu_score,
+                                'meteor': n_meteor_score, 'sacre_bleu': sacrebleu_score, 'rouge': n_rouge_score, 'rougeL': n_rouge_L_score})
+
         self.results.append({'bleu_avg': self.bleu_avg.avg, 'meteor_avg': self.meteor_avg.avg,
-                            'sacrebleu_avg': self.sacrebleu_avg.avg, 'rouge_avg': self.rouge_avg.avg})
+                            'sacrebleu_avg': self.sacrebleu_avg.avg, 'rouge_avg': self.rouge_avg.avg, 'rouge_L_avg': self.rouge_L_avg.avg})
+
         return self.results
 
     def save_to_file(self):

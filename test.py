@@ -40,7 +40,7 @@ if __name__ == '__main__':
         """-- Loading Tokenizer: {model} --""".format(model=args.model_name))
     tokenizer = set_tokenizer(model_name=args.model_name, path=path)
 
-    # Calculate score 
+    # Calculate score
     scorer = Score()
     scorer.data_scorer(
         data, model=model, tokenizer=tokenizer, torch_device=torch_device)
@@ -55,3 +55,5 @@ if __name__ == '__main__':
         score=scorer.sacrebleu_avg.avg))
     logger.info("""Rouge Score Average: {score}""".format(
         score=scorer.rouge_avg.avg))
+    logger.info("""Rouge L Score Average: {score}""".format(
+        score=scorer.rouge_L_avg.avg))
