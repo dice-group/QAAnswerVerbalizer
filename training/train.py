@@ -25,16 +25,16 @@ class FineTuningTrainer:
         return TrainingArguments(
             num_train_epochs=args.train_epochs,
             output_dir=output_directory,
-            per_device_train_batch_size=1,
-            per_device_eval_batch_size=1,
+            per_device_train_batch_size=args.device_train_batch_size,
+            per_device_eval_batch_size=args.device_eval_batch_size,
             save_steps=args.save_steps,
-            save_strategy='steps',
-            save_total_limit=4,
-            evaluation_strategy='steps',
+            save_strategy=args.save_strategy,
+            save_total_limit=args.save_limit,
+            evaluation_strategy=args.eval_strategy,
             eval_steps=args.eval_steps,
-            warmup_steps=100,
-            weight_decay=0.01,
-            load_best_model_at_end=True,
+            warmup_steps=args.warmup_steps,
+            weight_decay=args.weight_decay,
+            load_best_model_at_end=args.load_best_model_at_end,
         )
 
     def get_trainer(self):
