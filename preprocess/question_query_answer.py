@@ -18,7 +18,7 @@ class question_query_answer:
                     return question['string']
                 else:
                     return None
-        if self.dataset == 'vquanda' or 'paraQA':
+        if self.dataset == 'vquanda' or self.dataset == 'paraQA' or self.dataset == 'vanilla':
             return self.data['question']
         if self.dataset == 'grailQA':
             return self.data['question']
@@ -31,12 +31,14 @@ class question_query_answer:
             if 'query' in self.data:
                 for _, v in self.data['query'].items():
                     return v
-        if self.dataset == 'vquanda' or 'paraQA':
+        if self.dataset == 'vquanda' or self.dataset == 'paraQA':
             return self.data['query']
         if self.dataset == 'grailQA':
             query_sparql = self.data['sparql_query']
             query_graph = self.data['graph_query']
             return query_sparql, query_graph
+        else:
+            return None
 
     def get_answers(self):
         """Get all the answers"""
@@ -49,13 +51,16 @@ class question_query_answer:
         """Get the id of the object. One id can be mapped to questions, query and answers """
         if self.dataset == 'quald':
             return self.data['id']
-        if self.dataset == 'vquanda' or 'paraQA':
+        if self.dataset == 'vquanda' or self.dataset == 'paraQA':
             return self.data['uid']
         if self.dataset == 'grailQA':
             return self.data['qid']
+        if self.dataset == 'vanilla':
+            return self.data['question_id']
         else:
             return None
 
+    @staticmethod
     def get_label_endpoint(e, endpoint="wikidata"):
         label = link(entity=e, endpoint=endpoint)
         return label
@@ -121,6 +126,9 @@ class question_query_answer:
             ans_string = ", ".join(answers)
             return ans_string
 
+        if self.dataset == 'vanilla':
+            return self.data['answer']
+
         else:
             return None
 
@@ -149,11 +157,14 @@ class question_query_answer:
         if self.dataset == 'paraQA':
             verbalized = []
             verbalized.append(self.data['verbalized_answer'])
-            for i in range(2, 8):
+            for i in range(2, 9):
                 key = """verbalized_answer_{i}""".format(i=i)
                 verbalized_ans = self.data[key]
                 if verbalized_ans != "":
                     verbalized.append(verbalized_ans)
             return verbalized
+
+        if self.dataset == 'vanilla':
+            return self.data['answer_sentence']
         else:
             return None

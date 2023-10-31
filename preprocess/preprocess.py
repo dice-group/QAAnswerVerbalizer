@@ -5,16 +5,20 @@ import sys
 sys.path.append("./")
 from constants import get_project_root
 from constants import args
+from constants import *
 from tqdm import tqdm
 import re
 from question_query_answer import question_query_answer as qqa
 import json
+from flair.data import Sentence
+from flair.models import SequenceTagger
 
 root_path = get_project_root()
-ANS_TOKEN = '[ANS]'
 SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
            '!=': 'not_equal', '=': 'equal',  "'": ''
            }
+
+tagger = SequenceTagger.load('ner')
 
 
 def vquanda(path, num, verbose=True):
@@ -41,7 +45,7 @@ def vquanda(path, num, verbose=True):
     with open(path, 'r') as f:
         data = json.loads(f.read())
     final_dict = {}
-    for i in tqdm(range(num)):
+    for i in tqdm(range(len(data))):
         d = data[i]
         qa = qqa(d)
         index = qa.get_id()
@@ -50,12 +54,14 @@ def vquanda(path, num, verbose=True):
         query = qa.get_query()
         answers = qa.get_ans_label()
 
-        if query and question and verbalization is not (None and ""):
+        if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             if verbose:
                 query = make_verbose_vquanda(query)
             query = query.lower()
         if args.mask_ans:
+            question = mask_entities(question)
             verbalization = mask_answer(verbalization)
+            verbalization = mask_entities(verbalization)
 
         info = {'index': index, 'question': question,
                 'query': query, 'verbalization': verbalization, 'answers': answers}
@@ -100,11 +106,13 @@ def quald(path, num, lang='en', verbose=True):
         verbalization = qa.get_verbalized()
         answers = qa.get_ans_label()
 
-        if query is not (None and "") and question is not (None and "") and verbalization is not (None and ""):
+        if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             if verbose:
                 query = make_verbose(query, lang)
             if args.mask_ans:
+                question = mask_entities(question)
                 verbalization = mask_answer(verbalization)
+                verbalization = mask_entities(verbalization)
             query = query.lower()
 
             info = {'index': index, 'question': question,
@@ -170,9 +178,11 @@ def grailQA(path, num=280):
         verbalization = qa.get_verbalized()
         answers = qa.get_ans_label()
 
-        if query_sparql and question and verbalization is not None:
+        if query_sparql is not None and question is not None and verbalization is not None:
             if args.mask_ans:
+                question = mask_entities(question)
                 verbalization = mask_answer(verbalization)
+                verbalization = mask_entities(verbalization) 
             query_sparql.lower()
 
         info = {'index': index, 'question': question, 'query': {'sparql': query_sparql,
@@ -211,30 +221,93 @@ def paraQA(path, verbose=True):
         qa = qqa(d)
         index = qa.get_id()
         question = qa.get_question()
-        verbalization = qa.get_verbalized()
+        verbalizations = qa.get_verbalized()
         query = qa.get_query()
         answers = qa.get_ans_label()
 
-        if query is not (None and "") and question is not (None and "") and verbalization is not (None and ""):
+        if query is not None and query != "" and question is not None and question != "" and verbalizations is not None and verbalizations != "":
             if verbose:
                 query = make_verbose_vquanda(query)
             if args.mask_ans:
-                verbalization = mask_answer(verbalization)
+                question = mask_entities(question)
+                verbalizations = [mask_answer(v) for v in verbalizations]
+                verbalizations = mask_entities(verbalizations)
             query = query.lower()
 
             info = {'index': index, 'question': question,
-                    'query': query, 'verbalization': verbalization, 'answers': answers}
+                    'query': query, 'verbalization': verbalizations, 'answers': answers}
+            final_dict[i] = info
+    return final_dict
+
+
+def vanilla(path):
+    """
+    preprocess the the Vanilla dataset. 
+
+    Parameter
+    ---------
+
+    path: str
+    path of the json file of the dataset.
+
+    Returns: dict
+    -------------
+
+    dict of pre-processed index, question, verbalization, answers
+    """
+
+    with open(path, 'r') as f:
+        data = json.loads(f.read())
+
+    final_dict = {}
+    for i in tqdm(range(len(data))):
+        d = data[i]
+        qa = qqa(d)
+        index = qa.get_id()
+        question = qa.get_question()
+        verbalization = qa.get_verbalized()
+        answers = qa.get_ans_label()
+        if question is not None and question != "" and verbalization is not None and verbalization != "":
+            if args.mask_ans:
+                question = mask_entities(question)
+                masked_v = verbalization.replace(answers.lower(), ANS_TOKEN)
+                verbalization = mask_entities(masked_v)
+
+            info = {'index': index, 'question': question,
+                    'verbalization': verbalization, 'answers': answers}
             final_dict[i] = info
     return final_dict
 
 
 def mask_answer(verbalization):
-    ans_pattern = r'\[.*?\]'
-    ans = re.findall(ans_pattern, verbalization)
-    if ans:
-        verbalization = verbalization.replace(ans[0], ANS_TOKEN)
-
+    ans_pattern = re.compile(r'\[.*?\]')
+    verbalization = ans_pattern.sub(ANS_TOKEN, verbalization)
     return verbalization
+
+
+def mask_entities(verbalizations):
+    is_list = True
+    if isinstance(verbalizations, list):
+        sentences = [Sentence(verbalization)
+                     for verbalization in verbalizations]
+        
+    else:
+        sentences = [Sentence(verbalizations)]
+        is_list = False
+    tagger.predict(sentences)
+
+    m_verbalizations = []
+    for sentence in sentences:
+        verbalization = sentence.to_original_text()
+        for ent in sentence.get_spans('ner'):
+            if ent.text != 'ANS':
+                verbalization = verbalization.replace(ent.text, ENT_TOKEN)
+        m_verbalizations.append(verbalization)
+
+    if is_list:
+        return m_verbalizations
+    else:
+        return  m_verbalizations[0]
 
 
 def make_verbose(query, lang):
@@ -269,7 +342,7 @@ def make_verbose(query, lang):
     rel = list(set(rel))
 
     for entity in ent:
-        label = qqa.get_label_endpoint(entity)
+        label = qqa.get_label_endpoint(e=entity)
         query = query.replace("""wd:{e}""".format(e=entity), label)
         query = query.replace(
             """<http://www.wikidata.org/entity/{e}>""".format(e=entity), label)
@@ -297,8 +370,13 @@ def make_verbose_vquanda(query):
     ent = list(set(ent))
     for e in ent:
         # Get the labels of entities from the endpoint
-        label = qqa.get_label_endpoint(e, endpoint='dbpedia')
-        query = query.replace(e, label)
+        # label = qqa.get_label_endpoint(e, endpoint='dbpedia')
+        label = (e.rsplit('/', 1))[-1]
+        label = label.replace('>', '')
+        if 'resource' in e:
+            query = query.replace(e, ENT_TOKEN)
+        else:
+            query = query.replace(e, label)
 
     type_url = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
     if type_url in query:
@@ -344,5 +422,8 @@ if __name__ == '__main__':
 
     if args.dataset == 'paraQA':
         pre_data = paraQA(filepath)
+
+    if args.dataset == 'vanilla':
+        pre_data = vanilla(filepath)
 
     write_to_file(args.dataset, pre_data, args.name)
