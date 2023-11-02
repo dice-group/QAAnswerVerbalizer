@@ -6,6 +6,7 @@ import evaluate
 from transformers import PegasusForConditionalGeneration, PegasusTokenizer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 from transformers import BartForConditionalGeneration, BartTokenizer
+import nltk
 
 root_path = get_project_root()
 
@@ -17,15 +18,12 @@ def make_df(path=str):
     df = pd.DataFrame({"questions": [], "queries": [], 'labels': []}, index=[])
     df = df.astype('object')
 
+    index = 0
     for _, value in data.items():
-        index = value['index']
         question = value['question']
         verbalization = value['verbalization']
         answers = value['answers']
         query = value['query']
-        if args.dataset == 'paraQA' and args.name == 'train':
-            # In-case of ParaQA. only use the fist verbalization
-            verbalization = value['verbalization'][0]
 
         if args.dataset == 'grailQA':
             if args.mode == 'triples':
@@ -34,14 +32,27 @@ def make_df(path=str):
                 query = triple
             else:
                 query = query['sparql']
+
         if args.mask_ans:
             ans = ANS_TOKEN
         else:
             ans = answers
 
-        # add Answer token or Answer and Separator token along with query
-        ans_query = ans + ' ' + SEP_TOKEN + ' ' + query
-        df.loc[index] = [question, ans_query, verbalization]
+        if args.dataset == 'vanilla':
+            ans_query = ans
+        else:
+            # add Answer token or Answer and Separator token along with query
+            ans_query = ans + ' ' + SEP_TOKEN + ' ' + query
+
+        if args.dataset == 'paraQA' and args.name == 'train':
+            # In-case of ParaQA. make different pairs from all verbalizations
+            for v in verbalization:
+                df.loc[index] = [question, ans_query, v]
+                index += 1
+
+        else:
+            df.loc[index] = [question, ans_query, verbalization]
+            index += 1
 
     return df
 
@@ -76,7 +87,7 @@ def set_tokenizer(model_name, path):
 def predict(model, tokenizer, question, query, torch_device):
     input = tokenizer(question, query, return_tensors="pt").to(torch_device)
     outputs = model.generate(
-        input["input_ids"], max_length=100).to(torch_device)
+        **input, max_length=100).to(torch_device)
     verbalization = tokenizer.batch_decode(
         outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
 
@@ -126,6 +137,7 @@ class Score(object):
     returns: dict
 
     """
+
     def __init__(self):
         self.results = []
         self.bleu = evaluate.load('bleu')
@@ -186,4 +198,119 @@ class Score(object):
     def save_to_file(self):
         result = json.dumps(self.results)
         with open("""{path}/output/{dataset}_{model}_output.json""".format(path=root_path, dataset=args.dataset, model=args.model_name), 'w', encoding='utf-8') as f:
+            f.write(result)
+
+
+class NltkAverageScore():
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.sum = 0
+        self.count = 0
+        self.avg = 0
+
+    def calc_avg(self, score):
+        self.sum += score
+        self.count += 1
+        self.avg = self.sum / self.count
+
+
+class NltkScore(object):
+    """
+    Calculates scores (nltk) and average on different metrics after prediction. 
+    The Bleu, Meteor normalized. 
+    --------
+    Metrics
+    --------
+    1. Bleu
+    2. Meteor
+
+    -------------------------
+    returns: dict
+
+    """
+
+    def __init__(self):
+        self.results = []
+        self.bleu_avg = {
+            '1': NltkAverageScore(),
+            '2': NltkAverageScore(),
+            '3': NltkAverageScore(),
+            '4': NltkAverageScore()
+        }
+        self.meteor_avg = AverageScore()
+
+    def tokenize_sentence(self, sentence):
+        """Tokenize and add spaces with punctuations to be treated separately."""
+        punct = {
+            ",": " ,",
+            "'": " '",
+            "?": " ?",
+            ".": " ."
+        }
+        for k, v in punct.items():
+            sentence = sentence.replace(k, v)
+        return sentence.split()
+
+    def _bleu_score(self, pred, ref):
+        return {
+            '1': nltk.translate.bleu_score.sentence_bleu([ref], pred, weights=(1.0, 0.0, 0.0, 0.0)),
+            '2': nltk.translate.bleu_score.sentence_bleu([ref], pred, weights=(0.5, 0.5, 0.0, 0.0)),
+            '3': nltk.translate.bleu_score.sentence_bleu([ref], pred, weights=(0.33, 0.33, 0.33, 0.0)),
+            '4': nltk.translate.bleu_score.sentence_bleu([ref], pred, weights=(0.25, 0.25, 0.25, 0.25)),
+        }
+
+    def _meteor_score(self, pred, ref):
+        return nltk.translate.meteor_score.single_meteor_score(' '.join(ref), ' '.join(pred))
+
+    def _normalize(self, score):
+        return 100*score
+
+    def data_scorer(self, data, model, tokenizer, torch_device):
+        for i in tqdm(range(len(data))):
+            pred = predict(model, tokenizer,
+                           data.iloc[i, 0], data.iloc[i, 1], torch_device)
+            ref = data.iloc[i, 2]
+
+            pred = self.tokenize_sentence(pred)
+            ref = self.tokenize_sentence(ref)
+            bleu_score = self._bleu_score(pred, ref)
+            meteor_score = self._meteor_score(pred, ref)
+
+            n_meteor_score = self._normalize(meteor_score)
+
+            self.bleu_avg['1'].calc_avg(self._normalize(bleu_score['1']))
+            self.bleu_avg['2'].calc_avg(self._normalize(bleu_score['2']))
+            self.bleu_avg['3'].calc_avg(self._normalize(bleu_score['3']))
+            self.bleu_avg['4'].calc_avg(self._normalize(bleu_score['4']))
+            self.meteor_avg.calc_avg(n_meteor_score)
+
+            self.results.append({
+                'hyp': pred,
+                'reference': ref,
+                'bleu': {
+                    '1': self._normalize(bleu_score['1']),
+                    '2': self._normalize(bleu_score['2']),
+                    '3': self._normalize(bleu_score['3']),
+                    '4': self._normalize(bleu_score['4'])
+                },
+                'meteor': n_meteor_score
+            })
+
+        self.results.append({
+            'bleu_avg': {
+                '1': self.bleu_avg['1'].avg,
+                '2': self.bleu_avg['2'].avg,
+                '3': self.bleu_avg['3'].avg,
+                '4': self.bleu_avg['4'].avg
+            },
+            'meteor_avg': self.meteor_avg.avg
+        })
+
+        return self.results
+
+    def save_to_file(self):
+        result = json.dumps(self.results)
+        with open("""{path}/output/{dataset}_{model}_nltk_output.json""".format(path=root_path, dataset=args.dataset, model=args.model_name), 'w', encoding='utf-8') as f:
             f.write(result)
