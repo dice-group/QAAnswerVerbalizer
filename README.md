@@ -9,6 +9,7 @@ The datasets used in this scope are:
 2. **QALD-9 Plus**
 3. **VQuAnDA**
 4. **ParaQA** 
+5. **VANiLLa** [https://figshare.com/articles/dataset/Vanilla_dataset/12360743]
 
 The datasets GrailQA and QALD-9 Plus have been verbalized manually.
 
@@ -23,11 +24,13 @@ pip install requirements.txt
 
 See the [args](args.py) for more customization for preprocessing, fine-tuning and testing.
 ## Preprocessing
+The train and test datasets have to be preprocessed separately 
 To preprocess the datasets run: 
 
 ```bash
 python preprocess/preprocess.py --dataset qald --name train --mask_ans True
 python preprocess/preprocess.py --dataset qald --name test --mask_ans True
+python preprocess/preprocess.py --dataset vanilla --name train --mask_ans True
 ```
 The argument --dataset can be used to select the dataset for the experiment. The --name argument can be used to choose the train or test dataset.
 
