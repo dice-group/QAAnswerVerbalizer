@@ -51,8 +51,8 @@ class FineTuningTrainer:
 
 if __name__ == '__main__':
     root_path = get_project_root()
-    filepath = """{path}/data/{dataset}/preprocessed_{dataset}_{name}.json""".format(
-        path=root_path, dataset=args.dataset, name=args.name)
+    filepath = """{path}/data/{dataset}/preprocessed_{dataset}_train.json""".format(
+        path=root_path, dataset=args.dataset)
 
     data = make_df(path=str(filepath))
     train_data, val_data = train_val_split(data)
