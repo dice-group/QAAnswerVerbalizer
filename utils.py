@@ -23,7 +23,8 @@ def make_df(path=str):
         question = value['question']
         verbalization = value['verbalization']
         answers = value['answers']
-        query = value['query']
+        if args.dataset != 'vanilla':
+            query = value['query']
 
         if args.dataset == 'grailQA':
             if args.mode == 'triples':
@@ -144,11 +145,16 @@ class Score(object):
         self.meteor = evaluate.load('meteor')
         self.sacre_bleu = evaluate.load('sacrebleu')
         self.rouge = evaluate.load('rouge')
+        self.chrf = evaluate.load('chrf')
+        self.ter = evaluate.load('ter')
+
         self.bleu_avg = AverageScore()
         self.sacrebleu_avg = AverageScore()
         self.meteor_avg = AverageScore()
         self.rouge_avg = AverageScore()
         self.rouge_L_avg = AverageScore()
+        self.chrf_avg = AverageScore()
+        self.ter_avg = AverageScore()
 
     def _bleu_score(self, pred, ref):
         return self.bleu.compute(predictions=[pred], references=[ref])
@@ -175,6 +181,10 @@ class Score(object):
             meteor_score = self._meteor_score(pred, ref)
             sacrebleu_score = self._sacrebleu(pred, ref)
             rouge_score = self._rouge_score(pred, ref)
+            chrf_score = self.chrf.compute(
+                predictions=[pred], references=[[ref]], word_order=2)
+            ter_score = self.ter.compute(predictions=[pred], references=[
+                                         [ref]], case_sensitive=False)
 
             n_bleu_score = self._normalize(bleu_score['bleu'])
             n_meteor_score = self._normalize(meteor_score['meteor'])
@@ -186,12 +196,14 @@ class Score(object):
             self.rouge_avg.calc_avg(n_rouge_score)
             self.rouge_L_avg.calc_avg(n_rouge_L_score)
             self.sacrebleu_avg.calc_avg(sacrebleu_score['score'])
+            self.chrf_avg.calc_avg(chrf_score['score'])
+            self.ter_avg.calc_avg(ter_score['score'])
 
             self.results.append({'hyp': pred, 'reference': ref, 'bleu': n_bleu_score,
-                                'meteor': n_meteor_score, 'sacre_bleu': sacrebleu_score, 'rouge': n_rouge_score, 'rougeL': n_rouge_L_score})
+                                'meteor': n_meteor_score, 'sacre_bleu': sacrebleu_score, 'rouge': n_rouge_score, 'rougeL': n_rouge_L_score, 'chrf': chrf_score, 'ter': ter_score})
 
         self.results.append({'bleu_avg': self.bleu_avg.avg, 'meteor_avg': self.meteor_avg.avg,
-                            'sacrebleu_avg': self.sacrebleu_avg.avg, 'rouge_avg': self.rouge_avg.avg, 'rouge_L_avg': self.rouge_L_avg.avg})
+                            'sacrebleu_avg': self.sacrebleu_avg.avg, 'rouge_avg': self.rouge_avg.avg, 'rouge_L_avg': self.rouge_L_avg.avg, 'chrf_avg': self.chrf_avg.avg, 'ter_avg': self.ter_avg.avg})
 
         return self.results
 
@@ -239,7 +251,7 @@ class NltkScore(object):
             '3': NltkAverageScore(),
             '4': NltkAverageScore()
         }
-        self.meteor_avg = AverageScore()
+        self.meteor_avg = NltkAverageScore()
 
     def tokenize_sentence(self, sentence):
         """Tokenize and add spaces with punctuations to be treated separately."""
