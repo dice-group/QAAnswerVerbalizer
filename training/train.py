@@ -22,19 +22,25 @@ class FineTuningTrainer:
     def get_training_args(self):
         output_directory = """{path}/output/{dataset}/{model}""".format(
             path=root_path, dataset=args.dataset, model=args.model_name)
+        if args.save_strategy == 'steps':
+            trargs = {"save_steps": args.save_steps,
+                      "eval_steps": args.eval_steps}
+        else:
+            trargs = {}
         return TrainingArguments(
             num_train_epochs=args.train_epochs,
             output_dir=output_directory,
+            logging_dir=output_directory,
+            logging_strategy=args.save_strategy,
             per_device_train_batch_size=args.device_train_batch_size,
             per_device_eval_batch_size=args.device_eval_batch_size,
-            save_steps=args.save_steps,
-            save_strategy=args.save_strategy,
-            save_total_limit=args.save_limit,
-            evaluation_strategy=args.eval_strategy,
-            eval_steps=args.eval_steps,
             warmup_steps=args.warmup_steps,
             weight_decay=args.weight_decay,
+            evaluation_strategy=args.save_strategy,
+            save_total_limit=args.save_limit,
+            save_strategy=args.save_strategy,
             load_best_model_at_end=args.load_best_model_at_end,
+            **trargs
         )
 
     def get_trainer(self):
