@@ -12,6 +12,7 @@ from question_query_answer import question_query_answer as qqa
 import json
 from flair.data import Sentence
 from flair.models import SequenceTagger
+from rdflib import Graph, URIRef, BNode, Literal, Variable, Namespace
 
 root_path = get_project_root()
 SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
@@ -21,7 +22,7 @@ SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
 tagger = SequenceTagger.load('ner')
 
 
-def vquanda(path, num, verbose=True):
+def vquanda(path):
     """
     preprocess the the Vquanda dataset. 
 
@@ -55,16 +56,17 @@ def vquanda(path, num, verbose=True):
         answers = qa.get_ans_label()
 
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
-            if verbose:
-                query = make_verbose_vquanda(query)
+            triples = query_to_rdf(query, endpoint='dbpedia')
+            # triples = make_verbose_vquanda(triples)
+            query = make_verbose_vquanda(query)
             query = query.lower()
         if args.mask_ans:
-            question = mask_entities(question)
+            question, entities = mask_entities(question)
             verbalization = mask_answer(verbalization)
-            verbalization = mask_entities(verbalization)
+            verbalization, _ = mask_entities(verbalization)
 
         info = {'index': index, 'question': question,
-                'query': query, 'verbalization': verbalization, 'answers': answers}
+                'query': query, 'verbalization': verbalization, 'answers': answers, 'triples': triples}
         final_dict[i] = info
     return final_dict
 
@@ -108,6 +110,7 @@ def quald(path, num, lang='en', verbose=True):
 
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             if verbose:
+                triples = query_to_rdf(query, endpoint='wikidata')
                 query = make_verbose(query, lang)
             if args.mask_ans:
                 question = mask_entities(question)
@@ -116,7 +119,7 @@ def quald(path, num, lang='en', verbose=True):
             query = query.lower()
 
             info = {'index': index, 'question': question,
-                    'query': query, 'verbalization': verbalization, 'answers': answers}
+                    'query': query, 'verbalization': verbalization, 'answers': answers, 'triples': triples}
             final_dict[i] = info
     return final_dict
 
@@ -182,7 +185,7 @@ def grailQA(path, num=280):
             if args.mask_ans:
                 question = mask_entities(question)
                 verbalization = mask_answer(verbalization)
-                verbalization = mask_entities(verbalization) 
+                verbalization = mask_entities(verbalization)
             query_sparql.lower()
 
         info = {'index': index, 'question': question, 'query': {'sparql': query_sparql,
@@ -227,15 +230,18 @@ def paraQA(path, verbose=True):
 
         if query is not None and query != "" and question is not None and question != "" and verbalizations is not None and verbalizations != "":
             if verbose:
+                triples = query_to_rdf(query, endpoint='dbpedia')
                 query = make_verbose_vquanda(query)
             if args.mask_ans:
-                question = mask_entities(question)
+                question, q_ent = mask_entities(question)
                 verbalizations = [mask_answer(v) for v in verbalizations]
-                verbalizations = mask_entities(verbalizations)
-            query = query.lower()
-
-            info = {'index': index, 'question': question,
-                    'query': query, 'verbalization': verbalizations, 'answers': answers}
+                verbalizations, entities = mask_entities(verbalizations)
+                query = query.lower()
+                info = {'index': index, 'question': question,
+                        'query': query, 'triples': triples, 'verbalization': verbalizations, 'entities': entities, 'q_ent': q_ent, 'answers': answers}
+            else:
+                info = {'index': index, 'question': question,
+                        'query': query, 'triples': triples, 'verbalization': verbalizations, 'answers': answers}
             final_dict[i] = info
     return final_dict
 
@@ -290,24 +296,25 @@ def mask_entities(verbalizations):
     if isinstance(verbalizations, list):
         sentences = [Sentence(verbalization)
                      for verbalization in verbalizations]
-        
+
     else:
         sentences = [Sentence(verbalizations)]
         is_list = False
     tagger.predict(sentences)
 
     m_verbalizations = []
+    entities = []
     for sentence in sentences:
         verbalization = sentence.to_original_text()
         for ent in sentence.get_spans('ner'):
             if ent.text != 'ANS':
+                entities.append(ent.text)
                 verbalization = verbalization.replace(ent.text, ENT_TOKEN)
         m_verbalizations.append(verbalization)
-
     if is_list:
-        return m_verbalizations
+        return m_verbalizations, entities
     else:
-        return  m_verbalizations[0]
+        return m_verbalizations[0], entities
 
 
 def make_verbose(query, lang):
@@ -373,11 +380,13 @@ def make_verbose_vquanda(query):
         # label = qqa.get_label_endpoint(e, endpoint='dbpedia')
         label = (e.rsplit('/', 1))[-1]
         label = label.replace('>', '')
-        if 'resource' in e:
+
+        if args.mask_ans and 'resource' in e:
             query = query.replace(e, ENT_TOKEN)
         else:
             query = query.replace(e, label)
 
+    query = query.replace('\n', '')
     type_url = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
     if type_url in query:
         query = query.replace(type_url, 'type')
@@ -402,6 +411,105 @@ def replace_symbols_var(query):
     return query
 
 
+def query_to_rdf(query, endpoint):
+    def make_rdf(input, result):
+        if input.startswith("<") and input.endswith(">"):
+            input = input[1:-1]
+            return URIRef(input)
+
+        elif input.startswith('"') and input.endswith('"'):
+            return Literal(input)
+
+        elif input.startswith("?"):
+            input = input.replace('?', '')
+            if input == var:
+                if result != 'answer':
+                    return result
+                else:
+                    return URIRef(result)
+
+            else:
+                return Variable(input)
+        else:
+            return BNode()
+
+    def prep_query(query, endpoint='dbpedia'):
+        where_pattern = re.compile(r"WHERE\s*{\s*(.*?)\s*}\s*", re.DOTALL)
+        if 'WHERE' not in query:
+            pos_of_select = query.find('SELECT')
+            if pos_of_select != -1:
+                end_pos_of_select = query.find('{', pos_of_select)
+                if end_pos_of_select != -1:
+                    query = query[:end_pos_of_select] + \
+                        'WHERE' + query[end_pos_of_select:]
+
+        where_clause = where_pattern.findall(query)[0]
+
+        # Set Endpoints for parsing
+        if endpoint == 'dbpedia':
+            endpoint_uri = '<https://dbpedia.org/sparql>'
+        elif endpoint == 'wikidata':
+            endpoint_uri = '<https://query.wikidata.org/sparql>'
+
+        # Add SERVICE to parse query
+        new_where = f"SERVICE {endpoint_uri} {{ {where_clause} }}"
+        query = query.replace(where_clause, new_where)
+
+        # Fix count for vquanda
+        if args.dataset == 'vquanda':
+            if 'COUNT(' in query:
+                query = query.replace('COUNT(', '(COUNT(?uri) AS ')
+
+        # Get Filter Clause and exclude from triples
+        filter_clause = None
+        if 'FILTER' in where_clause:
+            filter_pattern = re.compile(r'(FILTER\s+\(.*?\))')
+            filter_clause = re.findall(filter_pattern, query)[0]
+            where_clause = where_clause.replace(filter_clause, '')
+
+        pattern_triples = re.compile(
+            r'(\?[a-zA-Z0-9_]+|<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+|\?\w+)')
+        triple_matches = re.findall(pattern_triples, where_clause)
+
+        return query, triple_matches, filter_clause
+
+    wrap_query, matches, filter_clause = prep_query(query, endpoint)
+    graph = Graph()
+    try:
+        qresults = graph.query(wrap_query)
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+    isLit = False
+    query_type = qresults.type
+    if query_type == 'ASK':
+        result = qresults.askAnswer
+    else:
+        var = str(qresults.vars[0])
+        result = 'answer'
+        for binding in qresults:
+            if isinstance(binding, Literal):
+                isLit = True
+            result = binding[0]
+    if args.mask_ans:
+        result = ANS_TOKEN
+
+    if matches:
+        for s, p, o in matches:
+            print(s, p, o)
+            s = make_rdf(s, result)
+            p = make_rdf(p, result)
+            o = make_rdf(o, result)
+            graph.add((s, p, o))
+
+    triples = graph.serialize(format='nt')
+    if filter_clause:
+        triples = triples + filter_clause
+
+    return triples
+
+
 def write_to_file(dataset, data, name):
     with open("""{path}/data/{dataset}/preprocessed_{dataset}_{name}.json""".format(path=root_path, dataset=dataset, name=name), 'w', encoding='utf-8') as file:
         json.dump(data, file, ensure_ascii=False)
@@ -412,7 +520,7 @@ if __name__ == '__main__':
     filepath = """{path}/data/{dataset}/{name}.json""".format(
         path=root_path, dataset=args.dataset, name=args.name)
     if args.dataset == 'vquanda':
-        pre_data = vquanda(filepath, num=args.num)
+        pre_data = vquanda(filepath)
 
     if args.dataset == 'quald':
         pre_data = quald(filepath, num=args.num, lang=args.lang)
