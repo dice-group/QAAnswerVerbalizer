@@ -11,51 +11,119 @@ import nltk
 root_path = get_project_root()
 
 
-def make_df(path=str):
-    with open(path, 'r') as f:
-        data = json.load(f)
+class PrepareInput():
+    """
+    Prepares input from different preprocessed datasets.
+    Datasets:
+    - VQuAnDa
+    - ParaQA
+    - QALD-9-plus
+    - GrailQA
+    - Vanilla
 
-    df = pd.DataFrame({"questions": [], "queries": [], 'labels': []}, index=[])
-    df = df.astype('object')
+    Parameters
+    -------------------------
+    path: string 
+    path of the preprocessed file
 
-    index = 0
-    for _, value in data.items():
-        question = value['question']
-        verbalization = value['verbalization']
-        answers = value['answers']
-        if args.dataset != 'vanilla':
-            query = value['query']
+    Returns
+    -------------------------
+    make_df(): pandas Dataframe
 
-        if args.dataset == 'grailQA':
-            if args.mode == 'triples':
-                triple = query['graph']
-                triple = get_triples_string(triple)
-                query = triple
+    get_data(): list of lists
+
+    """
+    def __init__(self, path):
+        self.args = args
+        self.path = path
+        self.data = None
+        self.func_map = {
+            'vquanda': self.prep_vquanda,
+            'vanilla': self.prep_vanilla,
+            'grailQA': self.prep_grailQA,
+            'paraQA': self.prep_paraQA,
+            'quald': self.prep_vquanda
+        }
+        self.all_data = []
+        self.load_data()
+
+    def load_data(self):
+        with open(self.path, 'r') as f:
+            d = json.load(f)
+        for _, value in tqdm(d.items()):
+            self.data = value
+            if self.args.dataset in self.func_map:
+                self.func_map[self.args.dataset]()
             else:
-                query = query['sparql']
+                print(f"Dataset {self.args.dataset} is not in the map")
 
-        if args.mask_ans:
-            ans = ANS_TOKEN
+    def prep_conditional_field(self):
+        self.cond_input = self.answers + ' ' + SEP_TOKEN + ' ' + self.cond_input
+
+    def prep_vquanda(self):
+        self.question = self.data['question']
+        if self.args.mask_ans:
+            self.answers = ANS_TOKEN
         else:
-            ans = answers
+            self.answers = self.data['answers']
 
-        if args.dataset == 'vanilla':
-            ans_query = ans
+        verbalization = self.data['verbalization']
+        if self.args.mode == 'query':
+            self.cond_input = self.data['query']
+        elif self.args.mode == 'triples':
+            self.cond_input = self.data['triples']
+
+        self.prep_conditional_field()
+        self.all_data.append([self.question, self.cond_input, verbalization])
+
+    def prep_vanilla(self):
+        self.question = self.data['question']
+        if self.args.mask_ans:
+            self.answers = ANS_TOKEN
         else:
-            # add Answer token or Answer and Separator token along with query
-            ans_query = ans + ' ' + SEP_TOKEN + ' ' + query
+            self.answers = self.data['answers']
+        verbalization = self.data['verbalization']
+        # No query present in Vanilla
+        self.cond_input = self.answers
+        self.all_data.append([self.question, self.cond_input, verbalization])
 
-        if args.dataset == 'paraQA' and args.name == 'train':
-            # In-case of ParaQA. make different pairs from all verbalizations
-            for v in verbalization:
-                df.loc[index] = [question, ans_query, v]
-                index += 1
-
+    def prep_grailQA(self):
+        self.question = self.data['question']
+        if self.args.mask_ans:
+            self.answers = ANS_TOKEN
         else:
-            df.loc[index] = [question, ans_query, verbalization]
-            index += 1
+            self.answers = self.data['answers']
+        verbalization = self.data['verbalization']
+        if self.args.mode == 'query':
+            self.cond_input = self.data['query']['sparql']
+        elif self.args.mode == 'triples':
 
-    return df
+            self.cond_input = get_triples_string(self.data['query']['graph'])
+
+        self.prep_conditional_field()
+        self.all_data.append([self.question, self.cond_input, verbalization])
+
+    def prep_paraQA(self):
+        self.question = self.data['question']
+        if self.args.mask_ans:
+            self.answers = ANS_TOKEN
+        else:
+            self.answers = self.data['answers']
+        verbalization = self.data['verbalization']
+
+        if self.args.mode == 'query':
+            self.cond_input = self.data['query']
+        elif self.args.mode == 'triples':
+            self.cond_input = self.data['triples']
+        self.prep_conditional_field()
+        for v in verbalization:
+            self.all_data.append([self.question, self.cond_input, v])
+
+    def make_df(self):
+        return pd.DataFrame(self.all_data, columns=["questions", "cond_input", "labels"])
+
+    def get_data(self):
+        return self.all_data
 
 
 def set_model(model_name, path, device):
