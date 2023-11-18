@@ -1,4 +1,4 @@
-"""DATASETS: QUALD-9 PLUS, VQUANDA, GRAILQA
+"""DATASETS: QUALD-9 PLUS, VQUANDA, GRAILQA, VANILLA
 """
 
 import sys
@@ -13,6 +13,9 @@ import json
 from flair.data import Sentence
 from flair.models import SequenceTagger
 from rdflib import Graph, URIRef, BNode, Literal, Variable, Namespace
+from rdflib.namespace import RDF
+
+
 
 root_path = get_project_root()
 SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
@@ -57,7 +60,7 @@ def vquanda(path):
 
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             triples = query_to_rdf(query, endpoint='dbpedia')
-            # triples = make_verbose_vquanda(triples)
+            triples = make_verbose_vquanda(triples)
             query = make_verbose_vquanda(query)
             query = query.lower()
         if args.mask_ans:
@@ -415,7 +418,16 @@ def query_to_rdf(query, endpoint):
     def make_rdf(input, result):
         if input.startswith("<") and input.endswith(">"):
             input = input[1:-1]
-            return URIRef(input)
+            if input == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type':
+                return RDF.type
+            else:
+                return URIRef(input)
+
+        elif any(input.startswith(k) for k, v in namespaces.items()):
+            for k, v in namespaces.items():
+                if input.startswith(k):
+                    input = input[len(k)+1:-1]
+                    return v[input]
 
         elif input.startswith('"') and input.endswith('"'):
             return Literal(input)
@@ -432,6 +444,15 @@ def query_to_rdf(query, endpoint):
                 return Variable(input)
         else:
             return BNode()
+
+    def get_namespace(query):
+        namespace_pattern = re.compile(
+            r'PREFIX\s+([a-zA-Z0-9_]+):\s*<([^>]+)>')
+        prefix_matches = re.findall(namespace_pattern, query)
+        namespace = {}
+        for pref, uri in prefix_matches:
+            namespace[pref] = Namespace(uri)
+        return namespace
 
     def prep_query(query, endpoint='dbpedia'):
         where_pattern = re.compile(r"WHERE\s*{\s*(.*?)\s*}\s*", re.DOTALL)
@@ -475,6 +496,12 @@ def query_to_rdf(query, endpoint):
 
     wrap_query, matches, filter_clause = prep_query(query, endpoint)
     graph = Graph()
+
+    if 'PREFIX' in query:
+        namespaces = get_namespace(query)
+        for k, v in namespaces.items():
+            graph.bind(k, v)
+
     try:
         qresults = graph.query(wrap_query)
     except Exception as e:
@@ -493,7 +520,10 @@ def query_to_rdf(query, endpoint):
                 isLit = True
             result = binding[0]
     if args.mask_ans:
-        result = ANS_TOKEN
+        if isLit:
+            result = Literal(ANS_TOKEN)
+        else:
+            result = URIRef(ANS_TOKEN)
 
     if matches:
         for s, p, o in matches:
