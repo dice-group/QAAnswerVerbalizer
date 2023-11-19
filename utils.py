@@ -7,6 +7,7 @@ from transformers import PegasusForConditionalGeneration, PegasusTokenizer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 from transformers import BartForConditionalGeneration, BartTokenizer
 import nltk
+from nltk.translate import chrf_score
 
 root_path = get_project_root()
 
@@ -42,7 +43,7 @@ class PrepareInput():
             'vanilla': self.prep_vanilla,
             'grailQA': self.prep_grailQA,
             'paraQA': self.prep_paraQA,
-            'quald': self.prep_vquanda
+            'quald': self.prep_quald
         }
         self.all_data = []
         self.load_data()
@@ -118,6 +119,22 @@ class PrepareInput():
         self.prep_conditional_field()
         for v in verbalization:
             self.all_data.append([self.question, self.cond_input, v])
+    
+    def prep_quald(self):
+        self.question = self.data['question']
+        if self.args.mask_ans:
+            self.answers = ANS_TOKEN
+        else:
+            self.answers = self.data['answers']
+
+        verbalization = self.data['verbalization']
+        if self.args.mode == 'query':
+            self.cond_input = self.data['query']
+        elif self.args.mode == 'triples':
+            self.cond_input = self.data['triples']
+
+        self.prep_conditional_field()
+        self.all_data.append([self.question, self.cond_input, verbalization])
 
     def make_df(self):
         return pd.DataFrame(self.all_data, columns=["questions", "cond_input", "labels"])
@@ -320,6 +337,7 @@ class NltkScore(object):
             '4': NltkAverageScore()
         }
         self.meteor_avg = NltkAverageScore()
+        self.chrf_avg = NltkAverageScore()
 
     def tokenize_sentence(self, sentence):
         """Tokenize and add spaces with punctuations to be treated separately."""
@@ -343,6 +361,9 @@ class NltkScore(object):
 
     def _meteor_score(self, pred, ref):
         return nltk.translate.meteor_score.single_meteor_score(' '.join(ref), ' '.join(pred))
+    
+    def _chrf_score(self, pred, ref):
+        return nltk.translate.chrf_score.sentence_chrf(pred, ref, min_len=1, max_len=6)
 
     def _normalize(self, score):
         return 100*score
@@ -357,6 +378,7 @@ class NltkScore(object):
             ref = self.tokenize_sentence(ref)
             bleu_score = self._bleu_score(pred, ref)
             meteor_score = self._meteor_score(pred, ref)
+            chrf_score = self._chrf_score(pred, ref)
 
             n_meteor_score = self._normalize(meteor_score)
 
@@ -365,16 +387,18 @@ class NltkScore(object):
             self.bleu_avg['3'].calc_avg(self._normalize(bleu_score['3']))
             self.bleu_avg['4'].calc_avg(self._normalize(bleu_score['4']))
             self.meteor_avg.calc_avg(n_meteor_score)
+            self.chrf_avg.calc_avg(self._normalize(chrf_score))
 
             self.results.append({
-                'hyp': pred,
-                'reference': ref,
+                'hyp': ' '.join(pred),
+                'reference': ' '.join(ref),
                 'bleu': {
                     '1': self._normalize(bleu_score['1']),
                     '2': self._normalize(bleu_score['2']),
                     '3': self._normalize(bleu_score['3']),
                     '4': self._normalize(bleu_score['4'])
                 },
+                'chrf++': self._normalize(chrf_score),
                 'meteor': n_meteor_score
             })
 
@@ -385,7 +409,8 @@ class NltkScore(object):
                 '3': self.bleu_avg['3'].avg,
                 '4': self.bleu_avg['4'].avg
             },
-            'meteor_avg': self.meteor_avg.avg
+            'meteor_avg': self.meteor_avg.avg,
+            'chrf_avg': self.chrf_avg.avg
         })
 
         return self.results
