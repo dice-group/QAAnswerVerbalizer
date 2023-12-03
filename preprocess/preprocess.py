@@ -13,9 +13,7 @@ import json
 from flair.data import Sentence
 from flair.models import SequenceTagger
 from rdflib import Graph, URIRef, BNode, Literal, Variable, Namespace
-from rdflib.namespace import RDF
-
-
+from rdflib.namespace import RDF, RDFS
 
 root_path = get_project_root()
 SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
@@ -59,7 +57,8 @@ def vquanda(path):
         answers = qa.get_ans_label()
 
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
-            triples = query_to_rdf(query, endpoint='dbpedia')
+            rdf_obj = QueryToRDF(query, endpoint='dbpedia')
+            triples = rdf_obj.make_triples()
             triples = make_verbose_vquanda(triples)
             query = make_verbose_vquanda(query)
             query = query.lower()
@@ -113,12 +112,16 @@ def quald(path, num, lang='en', verbose=True):
 
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             if verbose:
-                triples = query_to_rdf(query, endpoint='wikidata')
+                rdf_obj = QueryToRDF(query, endpoint='wikidata')
+                triples = rdf_obj.make_triples()
+                triples = triples.lower()
+                triples = make_verbose(triples, lang)
+                query = query.lower()
                 query = make_verbose(query, lang)
             if args.mask_ans:
-                question = mask_entities(question)
+                question, entities = mask_entities(question)
                 verbalization = mask_answer(verbalization)
-                verbalization = mask_entities(verbalization)
+                verbalization, _ = mask_entities(verbalization)
             query = query.lower()
 
             info = {'index': index, 'question': question,
@@ -233,13 +236,15 @@ def paraQA(path, verbose=True):
 
         if query is not None and query != "" and question is not None and question != "" and verbalizations is not None and verbalizations != "":
             if verbose:
-                triples = query_to_rdf(query, endpoint='dbpedia')
+                rdf_obj = QueryToRDF(query, endpoint='wikidata')
+                triples = rdf_obj.make_triples()
+                triples = make_verbose_vquanda(triples)
                 query = make_verbose_vquanda(query)
             if args.mask_ans:
                 question, q_ent = mask_entities(question)
                 verbalizations = [mask_answer(v) for v in verbalizations]
                 verbalizations, entities = mask_entities(verbalizations)
-                query = query.lower()
+
                 info = {'index': index, 'question': question,
                         'query': query, 'triples': triples, 'verbalization': verbalizations, 'entities': entities, 'q_ent': q_ent, 'answers': answers}
             else:
@@ -341,10 +346,10 @@ def make_verbose(query, lang):
     """
     # All Regular Expression Patterns to get entities, relations and prefix
     ent_pattern = re.compile(
-        r'wd:(Q\d+)|<http://www\.wikidata\.org/entity/(Q\d+)>')
+        r'wd:(q\d+)|<http://www\.wikidata\.org/entity/(q\d+)>')
     rel_pattern = re.compile(
-        r'(wdt|p|pq):(P\d+)\b|<http://www\.wikidata\.org/prop/direct/(P\d+)>')
-    prefix_pattern = re.compile(r'PREFIX [^:]+: <[^>]+>\s*')
+        r'(wdt|p|pq):(p\d+)\b|<http://www\.wikidata\.org/prop/direct/(p\d+)>')
+    prefix_pattern = re.compile(r'prefix [^:]+: <[^>]+>\s*')
 
     ent = [e for sub in ent_pattern.findall(query) for e in sub if e]
     rel = [r for sub in rel_pattern.findall(query) for r in sub if r]
@@ -352,13 +357,13 @@ def make_verbose(query, lang):
     rel = list(set(rel))
 
     for entity in ent:
-        label = qqa.get_label_endpoint(e=entity)
+        label = qqa.get_label_endpoint(e=entity.upper())
         query = query.replace("""wd:{e}""".format(e=entity), label)
         query = query.replace(
             """<http://www.wikidata.org/entity/{e}>""".format(e=entity), label)
 
     for relation in rel:
-        label = qqa.get_label_endpoint(relation)
+        label = qqa.get_label_endpoint(e=relation.upper())
         query = query.replace("""wdt:{r}""".format(r=relation), label)
         query = query.replace(
             """<http://www.wikidata.org/prop/direct/{r}>""".format(r=relation), label)
@@ -414,8 +419,132 @@ def replace_symbols_var(query):
     return query
 
 
-def query_to_rdf(query, endpoint):
-    def make_rdf(input, result):
+class QueryToRDF():
+    def __init__(self, query, endpoint):
+        self.query = query
+        self.endpoint = endpoint
+        if endpoint == 'dbpedia':
+            self.endpoint_uri = '<https://dbpedia.org/sparql>'
+        elif endpoint == 'wikidata':
+            self.endpoint_uri = '<https://query.wikidata.org/sparql>'
+
+        self.graph = Graph()
+        self.query_var = None
+        pass
+
+    def get_namespace(self):
+        namespace_pattern = re.compile(
+            r'prefix|PREFIX\s+([a-zA-Z0-9_]+):\s*<([^>]+)>')
+        prefix_matches = re.findall(namespace_pattern, self.query)
+        self.namespace = {}
+        for pref, uri in prefix_matches:
+            self.namespace[pref] = Namespace(uri)
+        return self.namespace
+
+    def get_where(self):
+        where_pattern = re.compile(r"(?<=where|WHERE).*}")
+
+        # Add where clause to fix queries
+        if 'where' not in self.query and 'WHERE' not in self.query:
+            pos_of_select = self.query.find('select' or 'SELECT')
+            if pos_of_select != -1:
+                end_pos_of_select = self.query.find('{', pos_of_select)
+                if end_pos_of_select != -1:
+                    self.query = self.query[:end_pos_of_select] + \
+                        'where' + self.query[end_pos_of_select:]
+
+        self.where_clause = where_pattern.findall(self.query)
+        if self.where_clause:
+            self.where_clause = self.where_clause[0]
+
+        # Fix count for vquanda
+        if args.dataset == 'vquanda' or args.dataset == 'paraQA':
+            if 'count(' in self.query or 'COUNT(':
+                self.query = self.query.replace('COUNT(', '(COUNT(?uri) as ')
+
+        # Get Filter Clause and exclude from triples
+        self.filter_clause = None
+        if 'filter' in self.where_clause:
+            filter_pattern = re.compile(r'(filter|FILTER\s+\(.*?\))')
+            filter_match = re.findall(filter_pattern, self.query)
+            if filter_match:
+                self.filter_clause = filter_match[0]
+                self.where_clause = self.where_clause.replace(
+                    self.filter_clause, '')
+        return self.where_clause
+
+    def add_limit(self):
+        if 'LIMIT' not in self.query:
+            self.query = self.query + " LIMIT 4"
+
+    def add_service(self):
+        new_where_clause = " { " + """SERVICE {endpoint_uri} {match} """.format(
+            endpoint_uri=self.endpoint_uri, match=self.where_clause) + "}"
+        self.query = self.query.replace(self.where_clause, new_where_clause)
+
+    def get_triples(self):
+        pattern_triples = re.compile(
+            r'(\?[a-zA-Z0-9_]+|<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+|\?\w+)')
+        triple_matches = re.findall(pattern_triples, self.where_clause)
+
+        return triple_matches
+
+    def process_query(self):
+        self.get_where()
+        self.add_service()
+        self.namespaces = self.get_namespace()
+        self.add_limit()
+        for k, v in self.namespaces.items():
+            self.graph.bind(k, v)
+
+        try:
+            self.query = ' '.join(self.query.split())
+
+            qresults = self.graph.query(self.query)
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
+
+        isLit = False
+        query_type = qresults.type
+        if query_type == 'ASK':
+            self.query_result = qresults.askAnswer
+        else:
+            self.query_var = str(qresults.vars[0])
+            self.query_result = 'answer'
+            try:
+                for binding in qresults.bindings:
+                    binding = binding.get(Variable(self.query_var))
+                    if isinstance(binding, Literal):
+                        isLit = True
+                    self.query_result = binding
+            except Exception as e:
+                print(f"Error Not able to parse: {e}")
+
+        if args.mask_ans:
+            if isLit:
+                self.query_result = Literal(ANS_TOKEN)
+            else:
+                self.query_result = URIRef(ANS_TOKEN)
+
+    def make_triples(self):
+        self.process_query()
+        matches = self.get_triples()
+        if matches:
+            for s, p, o in matches:
+                print(s, p, o)
+                s = self.make_rdf(s)
+                p = self.make_rdf(p)
+                o = self.make_rdf(o)
+                self.graph.add((s, p, o))
+
+        triples = self.graph.serialize(format='nt')
+        if self.filter_clause:
+            triples = triples + self.filter_clause
+
+        return triples
+
+    def make_rdf(self, input):
         if input.startswith("<") and input.endswith(">"):
             input = input[1:-1]
             if input == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type':
@@ -423,10 +552,10 @@ def query_to_rdf(query, endpoint):
             else:
                 return URIRef(input)
 
-        elif any(input.startswith(k) for k, v in namespaces.items()):
-            for k, v in namespaces.items():
+        elif any(input.startswith(k) for k, v in self.namespaces.items()):
+            for k, v in self.namespaces.items():
                 if input.startswith(k):
-                    input = input[len(k)+1:-1]
+                    input = input[len(k)+1:]
                     return v[input]
 
         elif input.startswith('"') and input.endswith('"'):
@@ -434,110 +563,16 @@ def query_to_rdf(query, endpoint):
 
         elif input.startswith("?"):
             input = input.replace('?', '')
-            if input == var:
-                if result != 'answer':
-                    return result
+            if input == self.query_var:
+                if self.query_result != 'answer':
+                    return self.query_result
                 else:
-                    return URIRef(result)
+                    return URIRef(self.query_result)
 
             else:
                 return Variable(input)
         else:
             return BNode()
-
-    def get_namespace(query):
-        namespace_pattern = re.compile(
-            r'PREFIX\s+([a-zA-Z0-9_]+):\s*<([^>]+)>')
-        prefix_matches = re.findall(namespace_pattern, query)
-        namespace = {}
-        for pref, uri in prefix_matches:
-            namespace[pref] = Namespace(uri)
-        return namespace
-
-    def prep_query(query, endpoint='dbpedia'):
-        where_pattern = re.compile(r"WHERE\s*{\s*(.*?)\s*}\s*", re.DOTALL)
-        if 'WHERE' not in query:
-            pos_of_select = query.find('SELECT')
-            if pos_of_select != -1:
-                end_pos_of_select = query.find('{', pos_of_select)
-                if end_pos_of_select != -1:
-                    query = query[:end_pos_of_select] + \
-                        'WHERE' + query[end_pos_of_select:]
-
-        where_clause = where_pattern.findall(query)[0]
-
-        # Set Endpoints for parsing
-        if endpoint == 'dbpedia':
-            endpoint_uri = '<https://dbpedia.org/sparql>'
-        elif endpoint == 'wikidata':
-            endpoint_uri = '<https://query.wikidata.org/sparql>'
-
-        # Add SERVICE to parse query
-        new_where = f"SERVICE {endpoint_uri} {{ {where_clause} }}"
-        query = query.replace(where_clause, new_where)
-
-        # Fix count for vquanda
-        if args.dataset == 'vquanda':
-            if 'COUNT(' in query:
-                query = query.replace('COUNT(', '(COUNT(?uri) AS ')
-
-        # Get Filter Clause and exclude from triples
-        filter_clause = None
-        if 'FILTER' in where_clause:
-            filter_pattern = re.compile(r'(FILTER\s+\(.*?\))')
-            filter_clause = re.findall(filter_pattern, query)[0]
-            where_clause = where_clause.replace(filter_clause, '')
-
-        pattern_triples = re.compile(
-            r'(\?[a-zA-Z0-9_]+|<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+|\?\w+)')
-        triple_matches = re.findall(pattern_triples, where_clause)
-
-        return query, triple_matches, filter_clause
-
-    wrap_query, matches, filter_clause = prep_query(query, endpoint)
-    graph = Graph()
-
-    if 'PREFIX' in query:
-        namespaces = get_namespace(query)
-        for k, v in namespaces.items():
-            graph.bind(k, v)
-
-    try:
-        qresults = graph.query(wrap_query)
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-    isLit = False
-    query_type = qresults.type
-    if query_type == 'ASK':
-        result = qresults.askAnswer
-    else:
-        var = str(qresults.vars[0])
-        result = 'answer'
-        for binding in qresults:
-            if isinstance(binding, Literal):
-                isLit = True
-            result = binding[0]
-    if args.mask_ans:
-        if isLit:
-            result = Literal(ANS_TOKEN)
-        else:
-            result = URIRef(ANS_TOKEN)
-
-    if matches:
-        for s, p, o in matches:
-            print(s, p, o)
-            s = make_rdf(s, result)
-            p = make_rdf(p, result)
-            o = make_rdf(o, result)
-            graph.add((s, p, o))
-
-    triples = graph.serialize(format='nt')
-    if filter_clause:
-        triples = triples + filter_clause
-
-    return triples
 
 
 def write_to_file(dataset, data, name):
