@@ -8,12 +8,14 @@ from constants import args
 from constants import *
 from tqdm import tqdm
 import re
-from question_query_answer import question_query_answer as qqa
+from question_query_answer import QuestionQueryAnswer as qqa
 import json
 from flair.data import Sentence
 from flair.models import SequenceTagger
-from rdflib import Graph, URIRef, BNode, Literal, Variable, Namespace
+import rdflib
+from rdflib import Graph, URIRef, BNode, Literal, Variable, Namespace, XSD
 from rdflib.namespace import RDF, RDFS
+import datetime
 
 root_path = get_project_root()
 SYMBOLS = {'{': 'brack_open ', '}': ' brack_close', '.': ' sep_dot ',
@@ -59,7 +61,6 @@ def vquanda(path):
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             rdf_obj = QueryToRDF(query, endpoint='dbpedia')
             triples = rdf_obj.make_triples()
-            triples = make_verbose_vquanda(triples)
             query = make_verbose_vquanda(query)
             query = query.lower()
         if args.mask_ans:
@@ -114,8 +115,6 @@ def quald(path, num, lang='en', verbose=True):
             if verbose:
                 rdf_obj = QueryToRDF(query, endpoint='wikidata')
                 triples = rdf_obj.make_triples()
-                triples = triples.lower()
-                triples = make_verbose(triples, lang)
                 query = query.lower()
                 query = make_verbose(query, lang)
             if args.mask_ans:
@@ -236,9 +235,8 @@ def paraQA(path, verbose=True):
 
         if query is not None and query != "" and question is not None and question != "" and verbalizations is not None and verbalizations != "":
             if verbose:
-                rdf_obj = QueryToRDF(query, endpoint='wikidata')
+                rdf_obj = QueryToRDF(query, endpoint='dbpedia')
                 triples = rdf_obj.make_triples()
-                triples = make_verbose_vquanda(triples)
                 query = make_verbose_vquanda(query)
             if args.mask_ans:
                 question, q_ent = mask_entities(question)
@@ -430,6 +428,7 @@ class QueryToRDF():
 
         self.graph = Graph()
         self.query_var = None
+        self.rdfs = RDFS
         pass
 
     def get_namespace(self):
@@ -538,11 +537,72 @@ class QueryToRDF():
                 o = self.make_rdf(o)
                 self.graph.add((s, p, o))
 
-        triples = self.graph.serialize(format='nt')
+        triples_labels = self.make_verbose()
+        triples = triples_labels
         if self.filter_clause:
             triples = triples + self.filter_clause
 
         return triples
+
+    def make_verbose(self):
+        wd = Namespace("http://www.wikidata.org/entity/")
+        self.g1 = Graph()
+
+        triples_labels = []
+        for s, p, o in self.graph:
+            print(s, p, o)
+            s_name = self.get_label_en(s)
+            p_name = self.get_label_en(p, isPred=True)
+            o_name = self.get_label_en(o)
+            triples_names = [s_name, p_name, o_name]
+            triples_labels.append(" ".join(triples_names))
+
+        triples_labels = " sep_dot ".join(triples_labels)
+        print(triples_labels)
+        return triples_labels
+
+    def get_label_en(self, input, isPred=False):
+        wd = Namespace("http://www.wikidata.org/entity/")
+        if isinstance(input, URIRef):
+            if input != URIRef('answer'):
+                input_name = None
+                try:
+                    uri_split = rdflib.namespace.split_uri(input)
+                    input_id = uri_split[1]
+                    input_ns = uri_split[0]
+                    input_name = input_id
+
+                    if args.dataset == 'quald' and isPred is True:
+                        if not input_ns.startswith(str(self.rdfs)):
+                            input = wd[input_id]
+
+                    self.g1.parse(input)
+                    for s, p, o in self.g1.triples((input, self.rdfs.label, None)):
+                        if o.language == 'en':
+                            input_name = o.value
+                except Exception as e:
+                    print(f"Could not get label: {e}")
+            else:
+                input_name = str(input)
+
+        elif isinstance(input, Variable):
+            input_name = "var_" + str(input)
+
+        elif isinstance(input, Literal):
+            if input.datatype == XSD.dateTime:
+                input_dt = datetime.datetime.fromisoformat(str(input))
+                formatted_input_dt = input_dt.strftime("%Y-%m-%d")
+                input_name = formatted_input_dt
+
+            else:
+                input_name = str(input)
+
+        elif isinstance(input, BNode):
+            input_name = None
+        else:
+            input_name = input
+
+        return input_name
 
     def make_rdf(self, input):
         if input.startswith("<") and input.endswith(">"):
