@@ -3,7 +3,7 @@ from linking import linking as link
 import re
 
 
-class question_query_answer:
+class QuestionQueryAnswer:
     """Gives the questions, queries, answers and their id from the json data"""
 
     def __init__(self, data):
