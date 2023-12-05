@@ -418,6 +418,22 @@ def replace_symbols_var(query):
 
 
 class QueryToRDF():
+    """
+    Converts a SPARQL query to RDF triples. 
+    The labels for the RDF triples are fetched from the respective endpoints.
+    The returned triples are separated with 'sep_dot' where multiple triples exist.
+
+    Parameters
+    ---------------
+    query: SPARQL query string
+    endpoint: Name of endpoint (dbpedia  or wikidata)
+
+
+    Returns
+    ---------------
+    triples: String
+    """
+
     def __init__(self, query, endpoint):
         self.query = query
         self.endpoint = endpoint
@@ -472,6 +488,32 @@ class QueryToRDF():
                     self.filter_clause, '')
         return self.where_clause
 
+    def expand_query(self):
+        """
+        To expand the triples in SPARQL queries that use shorthand ';' in triples.
+        The Subject is added to the predicate and object to form the triple.
+
+        Returns
+        ------------------
+        triple_matches: list of lists
+        """
+        pattern = r'(\?\w+)\s+((?:\w+:\w+\s+[\w\W]+?(?:\.\s|$))+)'
+        matches = re.finditer(pattern, self.where_clause, re.DOTALL)
+        triple_matches = []
+        for match in matches:
+            subject = match.group(1)
+            pred_obj_list = match.group(2)
+
+            pred_objs = re.split(r'\s*;\s*', pred_obj_list.strip())
+
+            for po in pred_objs:
+                po = po.strip('.')
+                po = po.split()
+                po = po[:2]
+                triple_matches.append([subject] + po)
+
+        return triple_matches
+
     def add_limit(self):
         if 'LIMIT' not in self.query:
             self.query = self.query + " LIMIT 4"
@@ -484,7 +526,10 @@ class QueryToRDF():
     def get_triples(self):
         pattern_triples = re.compile(
             r'(\?[a-zA-Z0-9_]+|<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+)\s+(<[^>]+>|[\w:]+|\?\w+)')
-        triple_matches = re.findall(pattern_triples, self.where_clause)
+        if ';' in self.where_clause:
+            triple_matches = self.expand_query()
+        else:
+            triple_matches = re.findall(pattern_triples, self.where_clause)
 
         return triple_matches
 
@@ -562,20 +607,41 @@ class QueryToRDF():
         return triples_labels
 
     def get_label_en(self, input, isPred=False):
+        """
+        Get labels of the triples from the respective endpoints if available.
+
+        The URIs are split to get local name for Qald-9 plus dataset to get labels for predicates by binding them with the entity Namespace.
+        For VQuAnDa and ParaQA, the local name is used as label incase label not found.
+
+        Parameter
+        -------------
+        input : String or any rdflib.term
+        isPred : bool
+
+        Returns
+        -------------
+        input_name : string
+
+        """
         wd = Namespace("http://www.wikidata.org/entity/")
         if isinstance(input, URIRef):
-            if input != URIRef('answer'):
-                input_name = None
+            if input != URIRef('answer') and input != URIRef(ANS_TOKEN):
+                input_name = ENT_TOKEN
                 try:
                     uri_split = rdflib.namespace.split_uri(input)
                     input_id = uri_split[1]
                     input_ns = uri_split[0]
                     input_name = input_id
+                except Exception as e:
+                    print(f"Not able to split {e}. PERFORMING BASIC SPLIT")
+                    uri_split = input.split('/')[-1]
+                    input_name = uri_split
 
-                    if args.dataset == 'quald' and isPred is True:
-                        if not input_ns.startswith(str(self.rdfs)):
-                            input = wd[input_id]
+                if args.dataset == 'quald' and isPred is True:
+                    if not input_ns.startswith(str(self.rdfs)):
+                        input = wd[input_id]
 
+                try:
                     self.g1.parse(input)
                     for s, p, o in self.g1.triples((input, self.rdfs.label, None)):
                         if o.language == 'en':
