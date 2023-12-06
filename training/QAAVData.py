@@ -21,9 +21,9 @@ def prepare_data(tokenizer, train_data, val_data):
     train_data = Dataset.from_pandas(train_data)
     val_data = Dataset.from_pandas(val_data)
     train_data_t = tokenize_data(
-        tokenizer, questions=train_data['questions'], atq=train_data['queries'], labels=train_data['labels'])
+        tokenizer, questions=train_data['questions'], atq=train_data['cond_input'], labels=train_data['labels'])
     val_data_t = tokenize_data(
-        tokenizer, questions=val_data['questions'], atq=val_data['queries'], labels=val_data['labels'])
+        tokenizer, questions=val_data['questions'], atq=val_data['cond_input'], labels=val_data['labels'])
     return train_data_t, val_data_t
 
 
