@@ -2,7 +2,7 @@
 ## Introduction
 There have been recent advancements in Knowledge Based Question Answering Sytems. The KBQA systems are focused on generating the answers for specific questions using Knowledge Bases. However, verbalization of the answers in the KBQA systems can present information in a more human readable form for better understanding and interaction. This gives the user a much better experience and interaction. We generate verbalizations of different questions and SPARQL queries by fine-tuning a pre-trained encoder-decoder transformer based model with conditional generation. Transfer Learning is employed to make use of previously learned weights by the transformer model. We experiment with both SPARQL Queries and RDF Triples as input along with the natural language question. The triples are generated from SPARQL queries where they are not available. We also experiment with masking of entities and answers in the question and the verbalized answer. The natural language verbalizations are generated using the question, query/triple and the answer(s). We experiment with different metrics including BLEU, SacreBLEU, METEOR, CHRF++, TER, ROUGE.
 
-<img src="docs/image/QQAV architecture.png" alt="QAAnswerVerbalizer" width="900"/
+<img src="docs/image/QQAV architecture.png" alt="QAAnswerVerbalizer" width="900"/>
 
 ## Datasets
 The datasets used in this scope are:
