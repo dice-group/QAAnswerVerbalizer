@@ -8,6 +8,7 @@ from transformers import T5ForConditionalGeneration, T5Tokenizer
 from transformers import BartForConditionalGeneration, BartTokenizer
 import nltk
 from nltk.translate import chrf_score
+import hashlib
 
 root_path = get_project_root()
 
@@ -34,6 +35,7 @@ class PrepareInput():
     get_data(): list of lists
 
     """
+
     def __init__(self, path):
         self.args = args
         self.path = path
@@ -119,7 +121,7 @@ class PrepareInput():
         self.prep_conditional_field()
         for v in verbalization:
             self.all_data.append([self.question, self.cond_input, v])
-    
+
     def prep_quald(self):
         self.question = self.data['question']
         if self.args.mask_ans:
@@ -253,6 +255,14 @@ class Score(object):
     def _rouge_score(self, pred, ref):
         return self.rouge.compute(predictions=[pred], references=[ref])
 
+    def _ter_score(self, pred, ref):
+        return self.ter.compute(predictions=[pred], references=[
+            [ref]], case_sensitive=False)
+
+    def _chrf_score(self, pred, ref):
+        return self.chrf.compute(
+            predictions=[pred], references=[[ref]], word_order=2)
+
     def _normalize(self, score):
         return 100*score
 
@@ -266,10 +276,8 @@ class Score(object):
             meteor_score = self._meteor_score(pred, ref)
             sacrebleu_score = self._sacrebleu(pred, ref)
             rouge_score = self._rouge_score(pred, ref)
-            chrf_score = self.chrf.compute(
-                predictions=[pred], references=[[ref]], word_order=2)
-            ter_score = self.ter.compute(predictions=[pred], references=[
-                                         [ref]], case_sensitive=False)
+            chrf_score = self._chrf_score(pred, ref)
+            ter_score = self._ter_score(pred, ref)
 
             n_bleu_score = self._normalize(bleu_score['bleu'])
             n_meteor_score = self._normalize(meteor_score['meteor'])
@@ -322,6 +330,7 @@ class NltkScore(object):
     --------
     1. Bleu
     2. Meteor
+    3. Chrf
 
     -------------------------
     returns: dict
@@ -361,14 +370,19 @@ class NltkScore(object):
 
     def _meteor_score(self, pred, ref):
         return nltk.translate.meteor_score.single_meteor_score(' '.join(ref), ' '.join(pred))
-    
+
     def _chrf_score(self, pred, ref):
         return nltk.translate.chrf_score.sentence_chrf(pred, ref, min_len=1, max_len=6)
 
     def _normalize(self, score):
         return 100*score
 
+    def _hash_text(self, text):
+        return int(hashlib.sha1(text.encode("utf-8")).hexdigest(), 16) % (10 ** 8)
+
     def data_scorer(self, data, model, tokenizer, torch_device):
+        obj = Score()
+        seen_questions = {}
         for i in tqdm(range(len(data))):
             pred = predict(model, tokenizer,
                            data.iloc[i, 0], data.iloc[i, 1], torch_device)
@@ -379,15 +393,12 @@ class NltkScore(object):
             bleu_score = self._bleu_score(pred, ref)
             meteor_score = self._meteor_score(pred, ref)
             chrf_score = self._chrf_score(pred, ref)
-
+            sacrebleu_score = obj._sacrebleu(' '.join(pred), ' '.join(ref))
+            ter_score = obj._ter_score(' '.join(pred), ' '.join(ref))
+            chrf_score_hf = obj._chrf_score(' '.join(pred), ' '.join(ref))
+            rougeL_score = obj._rouge_score(
+                ' '.join(pred), ' '.join(ref))['rougeL']
             n_meteor_score = self._normalize(meteor_score)
-
-            self.bleu_avg['1'].calc_avg(self._normalize(bleu_score['1']))
-            self.bleu_avg['2'].calc_avg(self._normalize(bleu_score['2']))
-            self.bleu_avg['3'].calc_avg(self._normalize(bleu_score['3']))
-            self.bleu_avg['4'].calc_avg(self._normalize(bleu_score['4']))
-            self.meteor_avg.calc_avg(n_meteor_score)
-            self.chrf_avg.calc_avg(self._normalize(chrf_score))
 
             self.results.append({
                 'hyp': ' '.join(pred),
@@ -399,8 +410,68 @@ class NltkScore(object):
                     '4': self._normalize(bleu_score['4'])
                 },
                 'chrf++': self._normalize(chrf_score),
-                'meteor': n_meteor_score
+                'meteor': n_meteor_score,
+                'sacrebleu': sacrebleu_score,
+                'ter': ter_score,
+                'chrf_hf': chrf_score_hf,
+                'rougeL': rougeL_score
             })
+
+            if args.dataset == 'paraQA':
+                question_hash = self._hash_text(' '.join(data.iloc[i, 1]))
+                if question_hash in seen_questions:
+                    seen_questions[question_hash]['bleu']['1'].append(
+                        self._normalize(bleu_score['1']))
+                    seen_questions[question_hash]['bleu']['2'].append(
+                        self._normalize(bleu_score['2']))
+                    seen_questions[question_hash]['bleu']['3'].append(
+                        self._normalize(bleu_score['3']))
+                    seen_questions[question_hash]['bleu']['4'].append(
+                        self._normalize(bleu_score['4']))
+                    seen_questions[question_hash]['meteor'].append(
+                        n_meteor_score)
+                    seen_questions[question_hash]['sacrebleu'].append(
+                        sacrebleu_score['score'])
+                    seen_questions[question_hash]['ter'].append(
+                        ter_score['score'])
+                    seen_questions[question_hash]['chrf'].append(chrf_score)
+
+                else:
+                    seen_questions[question_hash] = {
+                        'bleu': {
+                            '1': self._normalize(bleu_score['1']),
+                            '2': self._normalize(bleu_score['2']),
+                            '3': self._normalize(bleu_score['3']),
+                            '4': self._normalize(bleu_score['4'])
+                        },
+                        'meteor': self._normalize(n_meteor_score),
+                        'sacrebleu': self._normalize(sacrebleu_score),
+                        'chrf': [self._normalize(chrf_score)],
+                        'ter': [ter_score['score']]
+
+                    }
+            else:
+                self.bleu_avg['1'].calc_avg(self._normalize(bleu_score['1']))
+                self.bleu_avg['2'].calc_avg(self._normalize(bleu_score['2']))
+                self.bleu_avg['3'].calc_avg(self._normalize(bleu_score['3']))
+                self.bleu_avg['4'].calc_avg(self._normalize(bleu_score['4']))
+                self.meteor_avg.calc_avg(n_meteor_score)
+                obj.sacrebleu_avg.calc_avg(sacrebleu_score['score'])
+                self.chrf_avg.calc_avg(self._normalize(chrf_score))
+                obj.chrf_avg.calc_avg(self._normalize(chrf_score_hf['score']))
+                obj.ter_avg.calc_avg(ter_score['score'])
+                obj.rouge_L_avg.calc_avg(rougeL_score)
+
+        if args.dataset == 'paraQA':
+            for scores in seen_questions.values():
+                self.bleu_avg['1'].calc_avg(max(scores['bleu_score']['1']))
+                self.bleu_avg['2'].calc_avg(max(scores['bleu_score']['2']))
+                self.bleu_avg['3'].calc_avg(max(scores['bleu_score']['3']))
+                self.bleu_avg['4'].calc_avg(max(scores['bleu_score']['4']))
+                self.meteor_avg.calc_avg(max(scores['meteor']))
+                obj.sacrebleu_avg.calc_avg(max(scores['sacrebleu']))
+                self.chrf_avg.calc_avg(max(scores['chrf']))
+                self.obj.ter_avg.calc_avg(min(scores['ter']))
 
         self.results.append({
             'bleu_avg': {
@@ -410,7 +481,11 @@ class NltkScore(object):
                 '4': self.bleu_avg['4'].avg
             },
             'meteor_avg': self.meteor_avg.avg,
-            'chrf_avg': self.chrf_avg.avg
+            'chrf_avg': self.chrf_avg.avg,
+            'sacrebleu_avg': obj.sacrebleu_avg.avg,
+            'ter_avg': obj.ter_avg.avg,
+            'chrf_hf_avg': obj.chrf_avg.avg,
+            'rougeL_avg': obj.rouge_L_avg.avg
         })
 
         return self.results

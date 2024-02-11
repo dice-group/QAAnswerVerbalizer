@@ -61,7 +61,7 @@ def vquanda(path):
         if query is not None and query != "" and question is not None and question != "" and verbalization is not None and verbalization != "":
             rdf_obj = QueryToRDF(query, endpoint='dbpedia')
             triples = rdf_obj.make_triples()
-            query = make_verbose_vquanda(query)
+            query, _ = make_verbose_vquanda(query)
             query = query.lower()
         if args.mask_ans:
             question, entities = mask_entities(question)
@@ -102,7 +102,7 @@ def quald(path, num, lang='en', verbose=True):
     with open(path, 'r') as f:
         data = json.loads(f.read())
     final_dict = {}
-    for i in tqdm(range(num)):
+    for i in tqdm(range(len(data))):
         d = data[str(i)]
         qa = qqa(d)
         index = qa.get_id()
@@ -118,7 +118,7 @@ def quald(path, num, lang='en', verbose=True):
                 query = query.lower()
                 query = make_verbose(query, lang)
             if args.mask_ans:
-                question, entities = mask_entities(question)
+                question, _ = mask_entities(question)
                 verbalization = mask_answer(verbalization)
                 verbalization, _ = mask_entities(verbalization)
             query = query.lower()
@@ -183,6 +183,8 @@ def grailQA(path, num=280):
         question = qa.get_question()
         query_sparql, query_graph = qa.get_query()
         triple = extract_nodes_entities(query_graph)
+        rdf_obj = QueryToRDF(query_sparql, endpoint='freebase')
+        triples_query = rdf_obj.make_triples()
         verbalization = qa.get_verbalized()
         answers = qa.get_ans_label()
 
@@ -194,7 +196,7 @@ def grailQA(path, num=280):
             query_sparql.lower()
 
         info = {'index': index, 'question': question, 'query': {'sparql': query_sparql,
-                                                                'graph': triple}, 'verbalization': verbalization, 'answers': answers}
+                                                                'graph': triple}, 'verbalization': verbalization, 'answers': answers, 'triples': triples_query}
         final_dict[i] = info
 
     return final_dict
@@ -381,6 +383,7 @@ def make_verbose_vquanda(query):
         r'(<http://dbpedia.org/resource/[^>]+>) |(<http://dbpedia.org/property/[^>]+>) |(<http://dbpedia.org/ontology/[^>]+>)')
     ent = [e for sub in pattern.findall(query) for e in sub if e]
     ent = list(set(ent))
+    replaced_ent = []
     for e in ent:
         # Get the labels of entities from the endpoint
         # label = qqa.get_label_endpoint(e, endpoint='dbpedia')
@@ -389,6 +392,7 @@ def make_verbose_vquanda(query):
 
         if args.mask_ans and 'resource' in e:
             query = query.replace(e, ENT_TOKEN)
+            replaced_ent.append(e)
         else:
             query = query.replace(e, label)
 
@@ -398,7 +402,7 @@ def make_verbose_vquanda(query):
         query = query.replace(type_url, 'type')
     query = replace_symbols_var(query)
 
-    return query
+    return query, replaced_ent
 
 
 def replace_symbols_var(query):
@@ -441,6 +445,8 @@ class QueryToRDF():
             self.endpoint_uri = '<https://dbpedia.org/sparql>'
         elif endpoint == 'wikidata':
             self.endpoint_uri = '<https://query.wikidata.org/sparql>'
+        elif endpoint == 'freebase':
+            self.endpoint_uri = '<https://freebase.data.dice-research.org/sparql>'
 
         self.graph = Graph()
         self.query_var = None
@@ -458,7 +464,7 @@ class QueryToRDF():
 
     def get_where(self):
         where_pattern = re.compile(r"(?<=where|WHERE).*}")
-
+        self.query = self.query.replace('\n', '')
         # Add where clause to fix queries
         if 'where' not in self.query and 'WHERE' not in self.query:
             pos_of_select = self.query.find('select' or 'SELECT')
@@ -471,6 +477,8 @@ class QueryToRDF():
         self.where_clause = where_pattern.findall(self.query)
         if self.where_clause:
             self.where_clause = self.where_clause[0]
+        else:
+            self.where_clause = 'None'
 
         # Fix count for vquanda
         if args.dataset == 'vquanda' or args.dataset == 'paraQA':
@@ -530,6 +538,10 @@ class QueryToRDF():
             triple_matches = self.expand_query()
         else:
             triple_matches = re.findall(pattern_triples, self.where_clause)
+
+        for i in triple_matches:
+            if len(i) != 3:
+                i.append('None')
 
         return triple_matches
 
@@ -600,7 +612,8 @@ class QueryToRDF():
             p_name = self.get_label_en(p, isPred=True)
             o_name = self.get_label_en(o)
             triples_names = [s_name, p_name, o_name]
-            triples_labels.append(" ".join(triples_names))
+            if triples_names:
+                triples_labels.append(" ".join(triples_names))
 
         triples_labels = " sep_dot ".join(triples_labels)
         print(triples_labels)
@@ -628,18 +641,19 @@ class QueryToRDF():
             if input != URIRef('answer') and input != URIRef(ANS_TOKEN):
                 input_name = ENT_TOKEN
                 try:
+                    uri_split = input.split('/')[-1]
+                    input_id = uri_split
                     uri_split = rdflib.namespace.split_uri(input)
                     input_id = uri_split[1]
                     input_ns = uri_split[0]
                     input_name = input_id
+                    if args.dataset == 'quald' and isPred is True:
+                        if not input_ns.startswith(str(self.rdfs)):
+                            input = wd[input_id]
                 except Exception as e:
                     print(f"Not able to split {e}. PERFORMING BASIC SPLIT")
                     uri_split = input.split('/')[-1]
                     input_name = uri_split
-
-                if args.dataset == 'quald' and isPred is True:
-                    if not input_ns.startswith(str(self.rdfs)):
-                        input = wd[input_id]
 
                 try:
                     self.g1.parse(input)
@@ -664,7 +678,7 @@ class QueryToRDF():
                 input_name = str(input)
 
         elif isinstance(input, BNode):
-            input_name = None
+            input_name = 'None'
         else:
             input_name = input
 

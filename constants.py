@@ -12,4 +12,5 @@ args = parser.parse_args()
 
 TORCH_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 ANS_TOKEN = '[ANS]'
+ENT_TOKEN = '[ENT]'
 SEP_TOKEN = '<SEP>'
