@@ -1,3 +1,4 @@
+from constants import args
 from datasets import Dataset
 import torch
 
@@ -47,8 +48,13 @@ def train_val_split(data, frac=0.8):
 
 
 def tokenize_data(tokenizer, questions, atq, labels):
-    encodings = tokenizer(questions, atq, return_tensors="pt",
-                          truncation=True, padding=True)
+    if args.mode_t:
+        encodings = tokenizer(atq, return_tensors="pt",
+                              truncation=True, padding=True)
+    else:
+        encodings = tokenizer(questions, atq, return_tensors="pt",
+                              truncation=True, padding=True)
+
     decodings = tokenizer(labels, return_tensors="pt",
                           truncation=True, padding=True)
     tokenized_data = QAAnswerVerbalizationDataset(encodings, decodings)
