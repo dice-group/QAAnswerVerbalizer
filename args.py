@@ -12,19 +12,21 @@ def get_parser():
                         help='choice between train and test data')
     parser.add_argument('--lang', default='en', type=str,
                         help='Language choice only available for Quald-9 plus. en for English, de for German')
-    parser.add_argument('--mask_ans', default=True, type=bool,
+    parser.add_argument('--mask_ans', action='store_true',
                         help='Choice to mask answer with answer token')
-    parser.add_argument('--ans_limit', default=5, type=bool,
+    parser.add_argument('--ans_limit', default=5, type=int,
                         help='Choice to mask answer with answer token')
+    parser.add_argument('--mode_t', action='store_true',
+                        help='If mode only triples')
 
     parser.add_argument('--model_name', default='pegasus', type=str)
     parser.add_argument(
-        '--checkpoint_path', default='./output/quald/pegasus/checkpoint-5000', type=str, help='Checkpoint path')
+        '--checkpoint_path', default='checkpoint-3000', type=str, help='Checkpoint path')
     parser.add_argument('--model_path', default='google/pegasus-xsum',
                         type=str, help='Path of the model')
     parser.add_argument('--tokenizer_path', default='google/pegasus-xsum',
                         type=str, help='Path of the tokenizer')
-    parser.add_argument('--train_epochs', default=3,
+    parser.add_argument('--train_epochs', default=10,
                         type=int, help='Number of training epochs')
     parser.add_argument('--save_steps', default=1000, type=int,
                         help='Number of steps after which checkpoint will be created')
@@ -34,9 +36,9 @@ def get_parser():
                         help='If Triples or Query is to be used.')
     parser.add_argument('--save_strategy', default='steps', type=str)
     parser.add_argument('--eval_strategy', default='steps', type=str)
-    parser.add_argument('--device_train_batch_size', default=32,
+    parser.add_argument('--device_train_batch_size', default=16,
                         type=int, help='per device training batch size')
-    parser.add_argument('--device_eval_batch_size', default=32,
+    parser.add_argument('--device_eval_batch_size', default=16,
                         type=int, help='per device evaluation batch size')
     parser.add_argument('--warmup_steps', default=100,
                         type=int, help='warmup steps')

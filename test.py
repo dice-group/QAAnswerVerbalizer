@@ -22,13 +22,15 @@ logger.addHandler(con_handler)
 
 
 if __name__ == '__main__':
-    filepath = """{path}/data/{dataset}/preprocessed_{dataset}_{name}.json""".format(
-        path=root_path, dataset=args.dataset, name=args.name)
-    data = make_df(path=str(filepath))
+    filepath = """{path}/data/{dataset}/preprocessed_{dataset}_test.json""".format(
+        path=root_path, dataset=args.dataset)
+    obj = PrepareInput(filepath)
+    data = obj.make_df()
     logger.info(
         """Length of Test Dataset: {length}""".format(length=len(data)))
 
-    path = args.checkpoint_path
+    path = """{rootpath}/output/{dataset}/{model}/{checkpoint}""".format(
+        rootpath=root_path, dataset=args.dataset, model=args.model_name, checkpoint=args.checkpoint_path)
     torch_device = TORCH_DEVICE
     logger.info(
         """-- Loading {name} dataset {dataset}""".format(name=args.name, dataset=args.dataset))
@@ -57,3 +59,25 @@ if __name__ == '__main__':
         score=scorer.rouge_avg.avg))
     logger.info("""Rouge L Score Average: {score}""".format(
         score=scorer.rouge_L_avg.avg))
+    logger.info("""CHRF ScoreAverage: {score}""".format(
+        score=scorer.chrf_avg.avg))
+    logger.info("""TER ScoreAverage: {score}""".format(
+        score=scorer.ter_avg.avg))
+
+    nltk_scorer = NltkScore()
+    nltk_scorer.data_scorer(
+        data, model=model, tokenizer=tokenizer, torch_device=torch_device)
+    nltk_scorer.save_to_file()
+
+    logger.info(logger.info("""Meteor Score Average: {score}""".format(
+        score=nltk_scorer.meteor_avg.avg)))
+    logger.info("""BLEU-1 Score Average: {score}""".format(
+        score=nltk_scorer.bleu_avg['1'].avg))
+    logger.info("""BLEU-2 Score Average: {score}""".format(
+        score=nltk_scorer.bleu_avg['2'].avg))
+    logger.info("""BLEU-3 Score Average: {score}""".format(
+        score=nltk_scorer.bleu_avg['3'].avg))
+    logger.info("""BLEU-4 Score Average: {score}""".format(
+        score=nltk_scorer.bleu_avg['4'].avg))
+    logger.info("""CHRF ScoreAverage: {score}""".format(
+        score=nltk_scorer.chrf_avg.avg))

@@ -1,3 +1,4 @@
+from constants import args
 from datasets import Dataset
 import torch
 
@@ -21,9 +22,9 @@ def prepare_data(tokenizer, train_data, val_data):
     train_data = Dataset.from_pandas(train_data)
     val_data = Dataset.from_pandas(val_data)
     train_data_t = tokenize_data(
-        tokenizer, questions=train_data['questions'], atq=train_data['queries'], labels=train_data['labels'])
+        tokenizer, questions=train_data['questions'], atq=train_data['cond_input'], labels=train_data['labels'])
     val_data_t = tokenize_data(
-        tokenizer, questions=val_data['questions'], atq=val_data['queries'], labels=val_data['labels'])
+        tokenizer, questions=val_data['questions'], atq=val_data['cond_input'], labels=val_data['labels'])
     return train_data_t, val_data_t
 
 
@@ -47,8 +48,13 @@ def train_val_split(data, frac=0.8):
 
 
 def tokenize_data(tokenizer, questions, atq, labels):
-    encodings = tokenizer(questions, atq, return_tensors="pt",
-                          truncation=True, padding=True)
+    if args.mode_t:
+        encodings = tokenizer(atq, return_tensors="pt",
+                              truncation=True, padding=True)
+    else:
+        encodings = tokenizer(questions, atq, return_tensors="pt",
+                              truncation=True, padding=True)
+
     decodings = tokenizer(labels, return_tensors="pt",
                           truncation=True, padding=True)
     tokenized_data = QAAnswerVerbalizationDataset(encodings, decodings)
