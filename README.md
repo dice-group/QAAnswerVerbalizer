@@ -15,7 +15,9 @@ The datasets used in this scope are:
 The datasets GrailQA and QALD-9 Plus have been verbalized manually.
 
 Please move all the datasets in the [data](data) folder under their specific names.
-
+## Models
+Our finetuned models can be dowloaded from this FTP folder:
+https://files.dice-research.org/projects/QA-Verbalization/SEMANTICS2024/
 ## Requirements and Setup
 Clone the repository and install requirements.txt
 
